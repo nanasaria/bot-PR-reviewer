@@ -24,6 +24,19 @@ export class EnvironmentConfig {
   @IsOptional()
   @IsString()
   CLAUDE_COMMAND: string = 'claude';
+
+  @IsOptional()
+  @IsString()
+  OLLAMA_API_BASE_URL: string = 'http://localhost:11434/api';
+
+  @IsOptional()
+  @IsString()
+  OLLAMA_MODEL: string = 'qwen3-coder:30b';
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  OLLAMA_TIMEOUT_MS: number = 180000;
 }
 
 export function validateEnv(

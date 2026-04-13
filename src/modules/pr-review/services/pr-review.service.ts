@@ -1,14 +1,23 @@
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  InternalServerErrorException,
+  Logger,
+} from '@nestjs/common';
 import { getErrorMessage } from '../../../common/utils/error-message.util';
+import { isClaudeUsageLimitError } from '../../claude-cli/utils/claude-limit-error.util';
 import { GitHubService } from '../../github/services/github.service';
 import type { PullRequestReviewEvent } from '../../github/models/review-event.model';
 import { ClaudeCliService } from '../../claude-cli/services/claude-cli.service';
+import { OllamaService } from '../../ollama/services/ollama.service';
 import type { ClaudeIssue, ClaudeReview } from '../models/claude-review.model';
 import {
   parsePullRequestUrl,
   type GitHubPullRequestReference,
 } from '../models/pull-request-reference.model';
+import type { PullRequestReviewPromptModel } from '../models/pull-request-review-prompt.model';
 import type { ReviewOutcomeModel } from '../models/review-outcome.model';
+import { buildPullRequestReviewPrompt } from '../utils/review-prompt.util';
 
 @Injectable()
 export class PrReviewService {
@@ -17,6 +26,7 @@ export class PrReviewService {
   constructor(
     private readonly gitHubService: GitHubService,
     private readonly claudeCliService: ClaudeCliService,
+    private readonly ollamaService: OllamaService,
   ) {}
 
   async reviewPullRequest(pullRequestUrl: string): Promise<ReviewOutcomeModel> {
@@ -47,14 +57,14 @@ export class PrReviewService {
       );
     }
 
-    const reviewPrompt = this.claudeCliService.buildPrompt({
+    const reviewPrompt = this.buildReviewPrompt({
       repositoryOwner: owner,
       repositoryName,
       pullRequestNumber,
       pullRequestSummary,
       changedFiles,
     });
-    const claudeReview = await this.claudeCliService.runReview(reviewPrompt);
+    const claudeReview = await this.runReviewWithFallback(reviewPrompt);
 
     const reviewEvent = this.determineReviewEvent(claudeReview);
     const reviewBody = this.buildPublishedReviewBody(claudeReview);
@@ -109,6 +119,38 @@ export class PrReviewService {
       return parsePullRequestUrl(pullRequestUrl);
     } catch (error) {
       throw new BadRequestException(getErrorMessage(error));
+    }
+  }
+
+  private buildReviewPrompt(
+    reviewContext: PullRequestReviewPromptModel,
+  ): string {
+    return buildPullRequestReviewPrompt(reviewContext);
+  }
+
+  private async runReviewWithFallback(
+    reviewPrompt: string,
+  ): Promise<ClaudeReview> {
+    try {
+      return await this.claudeCliService.runReview(reviewPrompt);
+    } catch (claudeError) {
+      if (!isClaudeUsageLimitError(claudeError)) {
+        throw claudeError;
+      }
+
+      this.logger.warn(
+        'Claude CLI atingiu o limite de uso. Tentando fallback local via Ollama.',
+      );
+
+      try {
+        return await this.ollamaService.runReview(reviewPrompt);
+      } catch (ollamaError) {
+        throw new InternalServerErrorException(
+          `Claude CLI atingiu o limite de uso e o fallback Ollama falhou. Claude: ${getErrorMessage(
+            claudeError,
+          )}. Ollama: ${getErrorMessage(ollamaError)}`,
+        );
+      }
     }
   }
 
