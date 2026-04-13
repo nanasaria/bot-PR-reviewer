@@ -1,0 +1,178 @@
+import * as childProcess from 'node:child_process';
+import { EventEmitter } from 'node:events';
+import { ClaudeCliService } from './claude-cli.service';
+
+jest.mock('node:child_process', () => {
+  const actualChildProcess =
+    jest.requireActual<typeof import('node:child_process')>(
+      'node:child_process',
+    );
+
+  return {
+    ...actualChildProcess,
+    spawn: jest.fn(),
+  };
+});
+
+type MockReadableStream = EventEmitter & {
+  setEncoding: jest.Mock<void, [BufferEncoding]>;
+};
+
+type MockClaudeProcess = EventEmitter & {
+  stdout: MockReadableStream;
+  stderr: MockReadableStream;
+};
+
+function createMockReadableStream(): MockReadableStream {
+  const stream = new EventEmitter() as MockReadableStream;
+  stream.setEncoding = jest.fn<void, [BufferEncoding]>();
+  return stream;
+}
+
+function createMockClaudeProcess(): MockClaudeProcess {
+  const mockProcess = new EventEmitter() as MockClaudeProcess;
+  mockProcess.stdout = createMockReadableStream();
+  mockProcess.stderr = createMockReadableStream();
+  return mockProcess;
+}
+
+describe('ClaudeCliService', () => {
+  const mockSpawn = jest.mocked(childProcess.spawn);
+
+  const buildService = (claudeCommand = 'claude-test'): ClaudeCliService => {
+    const configServiceMock = {
+      get: jest.fn((key: string) =>
+        key === 'CLAUDE_COMMAND' ? claudeCommand : undefined,
+      ),
+    };
+
+    return new ClaudeCliService(configServiceMock as never);
+  };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('executa o Claude CLI configurado e retorna a review validada', async () => {
+    const claudeCliService = buildService('claude-custom');
+    const runClaudeCommandSpy = jest
+      .spyOn(claudeCliService as never, 'runClaudeCommand')
+      .mockResolvedValue(
+        '{"decision":"APPROVE","body":"tudo certo","issues":[],"confidence":"high"}',
+      );
+
+    await expect(claudeCliService.runReview('revise este PR')).resolves.toEqual(
+      {
+        decision: 'APPROVE',
+        body: 'tudo certo',
+        issues: [],
+        confidence: 'high',
+      },
+    );
+    expect(runClaudeCommandSpy).toHaveBeenCalledWith('claude-custom', [
+      '-p',
+      'revise este PR',
+    ]);
+  });
+
+  it('lança erro quando a resposta do Claude CLI não passa no schema', async () => {
+    const claudeCliService = buildService();
+    jest
+      .spyOn(claudeCliService as never, 'runClaudeCommand')
+      .mockResolvedValue('{"body":"faltou decision"}');
+
+    await expect(claudeCliService.runReview('revise este PR')).rejects.toThrow(
+      'Resposta inválida do Claude CLI',
+    );
+  });
+
+  it('resolve stdout quando o processo termina com código zero', async () => {
+    const claudeCliService = buildService();
+    const mockProcess = createMockClaudeProcess();
+    mockSpawn.mockReturnValue(mockProcess as never);
+
+    const commandPromise = (
+      claudeCliService as unknown as {
+        runClaudeCommand: (
+          claudeCommand: string,
+          commandArguments: string[],
+        ) => Promise<string>;
+      }
+    ).runClaudeCommand('claude', ['-p', 'prompt']);
+
+    mockProcess.stdout.emit('data', '{"resultado":');
+    mockProcess.stdout.emit('data', '"ok"}');
+    mockProcess.stderr.emit('data', 'warning');
+    mockProcess.emit('close', 0);
+
+    await expect(commandPromise).resolves.toBe('{"resultado":"ok"}');
+    expect(mockSpawn).toHaveBeenCalledWith('claude', ['-p', 'prompt'], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    expect(mockProcess.stdout.setEncoding).toHaveBeenCalledWith('utf8');
+    expect(mockProcess.stderr.setEncoding).toHaveBeenCalledWith('utf8');
+  });
+
+  it('rejeita quando o processo termina com código diferente de zero', async () => {
+    const claudeCliService = buildService();
+    const mockProcess = createMockClaudeProcess();
+    mockSpawn.mockReturnValue(mockProcess as never);
+
+    const commandPromise = (
+      claudeCliService as unknown as {
+        runClaudeCommand: (
+          claudeCommand: string,
+          commandArguments: string[],
+        ) => Promise<string>;
+      }
+    ).runClaudeCommand('claude', ['-p', 'prompt']);
+
+    mockProcess.stderr.emit('data', 'limite excedido');
+    mockProcess.emit('close', 1);
+
+    await expect(commandPromise).rejects.toThrow(
+      'Claude CLI retornou código 1: limite excedido',
+    );
+  });
+
+  it('rejeita quando o processo emite evento de erro', async () => {
+    const claudeCliService = buildService();
+    const mockProcess = createMockClaudeProcess();
+    mockSpawn.mockReturnValue(mockProcess as never);
+
+    const commandPromise = (
+      claudeCliService as unknown as {
+        runClaudeCommand: (
+          claudeCommand: string,
+          commandArguments: string[],
+        ) => Promise<string>;
+      }
+    ).runClaudeCommand('claude', ['-p', 'prompt']);
+
+    mockProcess.emit('error', new Error('spawn ENOENT'));
+
+    await expect(commandPromise).rejects.toThrow(
+      'Erro ao executar o Claude CLI: spawn ENOENT',
+    );
+  });
+
+  it('rejeita quando o spawn falha de forma síncrona', async () => {
+    const claudeCliService = buildService();
+    mockSpawn.mockImplementation(() => {
+      throw new Error('binário não encontrado');
+    });
+
+    await expect(
+      (
+        claudeCliService as unknown as {
+          runClaudeCommand: (
+            claudeCommand: string,
+            commandArguments: string[],
+          ) => Promise<string>;
+        }
+      ).runClaudeCommand('claude', ['-p', 'prompt']),
+    ).rejects.toThrow(
+      'Falha ao executar o Claude CLI (claude): binário não encontrado',
+    );
+  });
+});

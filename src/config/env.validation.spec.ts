@@ -1,0 +1,36 @@
+import 'reflect-metadata';
+import { validateEnv } from './env.validation';
+
+describe('validateEnv', () => {
+  it('converte valores numéricos e aplica defaults', () => {
+    const environmentConfig = validateEnv({
+      GITHUB_TOKEN: 'github-token',
+      PORT: '4000',
+      OLLAMA_TIMEOUT_MS: '120000',
+    });
+
+    expect(environmentConfig).toEqual({
+      PORT: 4000,
+      GITHUB_TOKEN: 'github-token',
+      GITHUB_API_BASE_URL: 'https://api.github.com',
+      CLAUDE_COMMAND: 'claude',
+      OLLAMA_API_BASE_URL: 'http://localhost:11434/api',
+      OLLAMA_MODEL: 'qwen3-coder:30b',
+      OLLAMA_TIMEOUT_MS: 120000,
+    });
+  });
+
+  it('lança erro quando a configuração obrigatória está inválida', () => {
+    expect(() =>
+      validateEnv({
+        PORT: '0',
+      }),
+    ).toThrow('Configuração de ambiente inválida');
+
+    expect(() =>
+      validateEnv({
+        PORT: '0',
+      }),
+    ).toThrow('GITHUB_TOKEN');
+  });
+});
