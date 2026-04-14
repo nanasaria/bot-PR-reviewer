@@ -13,6 +13,9 @@ import type {
 } from '../models/github-pull-request.model';
 import type { PullRequestReviewEvent } from '../models/review-event.model';
 
+const OWN_PULL_REQUEST_REVIEW_ERROR_MESSAGE =
+  'Review Can not request changes on your own pull request';
+
 @Injectable()
 export class GitHubService {
   private readonly logger = new Logger(GitHubService.name);
@@ -104,17 +107,19 @@ export class GitHubService {
     reviewEvent: PullRequestReviewEvent,
   ): Promise<GitHubPublishedReview> {
     try {
-      const { data: publishedReview } = await this.octokit.pulls.createReview({
-        owner: repositoryOwner,
-        repo: repositoryName,
-        pull_number: pullRequestNumber,
-        body: reviewBody,
-        event: reviewEvent,
-      });
+      const { reviewEvent: publishedReviewEvent, reviewData } =
+        await this.createReviewWithFallbackForOwnPullRequest(
+          repositoryOwner,
+          repositoryName,
+          pullRequestNumber,
+          reviewBody,
+          reviewEvent,
+        );
 
       return {
-        id: publishedReview.id,
-        htmlUrl: publishedReview.html_url,
+        id: reviewData.id,
+        htmlUrl: reviewData.html_url,
+        event: publishedReviewEvent,
       };
     } catch (error) {
       this.throwGitHubOperationError(
@@ -123,6 +128,63 @@ export class GitHubService {
         error,
       );
     }
+  }
+
+  private async createReviewWithFallbackForOwnPullRequest(
+    repositoryOwner: string,
+    repositoryName: string,
+    pullRequestNumber: number,
+    reviewBody: string,
+    reviewEvent: PullRequestReviewEvent,
+  ) {
+    try {
+      const { data } = await this.octokit.pulls.createReview({
+        owner: repositoryOwner,
+        repo: repositoryName,
+        pull_number: pullRequestNumber,
+        body: reviewBody,
+        event: reviewEvent,
+      });
+
+      return {
+        reviewEvent,
+        reviewData: data,
+      };
+    } catch (error) {
+      if (this.shouldDowngradeSelfReviewToComment(error, reviewEvent)) {
+        this.logger.warn(
+          `GitHub não permite REQUEST_CHANGES no próprio PR. Publicando COMMENT em ${repositoryOwner}/${repositoryName}#${pullRequestNumber}.`,
+        );
+
+        const { data } = await this.octokit.pulls.createReview({
+          owner: repositoryOwner,
+          repo: repositoryName,
+          pull_number: pullRequestNumber,
+          body: reviewBody,
+          event: 'COMMENT',
+        });
+
+        return {
+          reviewEvent: 'COMMENT' as const,
+          reviewData: data,
+        };
+      }
+
+      throw error;
+    }
+  }
+
+  private shouldDowngradeSelfReviewToComment(
+    error: unknown,
+    reviewEvent: PullRequestReviewEvent,
+  ): boolean {
+    if (reviewEvent !== 'REQUEST_CHANGES') {
+      return false;
+    }
+
+    return getErrorMessage(error).includes(
+      OWN_PULL_REQUEST_REVIEW_ERROR_MESSAGE,
+    );
   }
 
   private throwGitHubOperationError(

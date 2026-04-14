@@ -180,6 +180,53 @@ describe('GitHubService', () => {
     ).resolves.toEqual({
       id: 15,
       htmlUrl: 'https://github.com/acme/widgets/pull/42#pullrequestreview-15',
+      event: 'COMMENT',
+    });
+  });
+
+  it('rebaixa REQUEST_CHANGES para COMMENT ao revisar o próprio PR', async () => {
+    const gitHubService = buildService();
+    mockPullsCreateReview
+      .mockRejectedValueOnce(
+        new Error(
+          'Unprocessable Entity: "Review Can not request changes on your own pull request"',
+        ),
+      )
+      .mockResolvedValueOnce({
+        data: {
+          id: 16,
+          html_url:
+            'https://github.com/acme/widgets/pull/42#pullrequestreview-16',
+        },
+      });
+
+    await expect(
+      gitHubService.publishReview(
+        'acme',
+        'widgets',
+        42,
+        'Review pronta',
+        'REQUEST_CHANGES',
+      ),
+    ).resolves.toEqual({
+      id: 16,
+      htmlUrl: 'https://github.com/acme/widgets/pull/42#pullrequestreview-16',
+      event: 'COMMENT',
+    });
+
+    expect(mockPullsCreateReview).toHaveBeenNthCalledWith(1, {
+      owner: 'acme',
+      repo: 'widgets',
+      pull_number: 42,
+      body: 'Review pronta',
+      event: 'REQUEST_CHANGES',
+    });
+    expect(mockPullsCreateReview).toHaveBeenNthCalledWith(2, {
+      owner: 'acme',
+      repo: 'widgets',
+      pull_number: 42,
+      body: 'Review pronta',
+      event: 'COMMENT',
     });
   });
 

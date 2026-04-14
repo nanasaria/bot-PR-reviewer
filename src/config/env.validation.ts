@@ -26,6 +26,11 @@ export class EnvironmentConfig {
   CLAUDE_COMMAND: string = 'claude';
 
   @IsOptional()
+  @IsInt()
+  @Min(1)
+  CLAUDE_TIMEOUT_MS: number = 120000;
+
+  @IsOptional()
   @IsString()
   OLLAMA_API_BASE_URL: string = 'http://localhost:11434/api';
 

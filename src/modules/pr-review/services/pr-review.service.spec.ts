@@ -138,6 +138,7 @@ describe('PrReviewService.reviewPullRequest', () => {
   const publishedReview: GitHubPublishedReview = {
     id: 10,
     htmlUrl: 'https://github.com/acme/widgets/pull/42#pullrequestreview-10',
+    event: 'COMMENT',
   };
 
   const buildService = () => {
@@ -205,6 +206,7 @@ describe('PrReviewService.reviewPullRequest', () => {
       'COMMENT',
     );
     expect(result.review).toEqual(publishedReview);
+    expect(result.event).toBe('COMMENT');
   });
 
   it('não usa fallback do Ollama para erro diferente de limite', async () => {
@@ -243,5 +245,26 @@ describe('PrReviewService.reviewPullRequest', () => {
     );
     expect(ollamaServiceMock.runReview).toHaveBeenCalledTimes(1);
     expect(gitHubServiceMock.publishReview).not.toHaveBeenCalled();
+  });
+
+  it('retorna o evento realmente publicado pelo GitHub', async () => {
+    const { prReviewService, gitHubServiceMock, claudeCliServiceMock } =
+      buildService();
+
+    claudeCliServiceMock.runReview.mockResolvedValue({
+      decision: 'REQUEST_CHANGES',
+      body: 'Há um problema importante',
+      issues: [{ severity: 'high', file: 'src/app.ts', reason: 'bug' }],
+      confidence: 'high',
+    });
+    gitHubServiceMock.publishReview.mockResolvedValue({
+      ...publishedReview,
+      event: 'COMMENT',
+    });
+
+    const result = await prReviewService.reviewPullRequest(pullRequestUrl);
+
+    expect(result.event).toBe('COMMENT');
+    expect(result.review.event).toBe('COMMENT');
   });
 });

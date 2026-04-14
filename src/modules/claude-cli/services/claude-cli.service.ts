@@ -22,10 +22,22 @@ export class ClaudeCliService {
   async runReview(prompt: string): Promise<ClaudeReview> {
     const claudeCommand =
       this.configService.get<string>('CLAUDE_COMMAND') ?? 'claude';
-    const rawResponse = await this.runClaudeCommand(claudeCommand, [
-      '-p',
-      prompt,
-    ]);
+    const claudeTimeoutMs =
+      this.configService.get<number>('CLAUDE_TIMEOUT_MS') ?? 120000;
+    const startedAt = Date.now();
+
+    this.logger.log(
+      `Executando Claude CLI com timeout de ${claudeTimeoutMs}ms.`,
+    );
+
+    const rawResponse = await this.runClaudeCommand(
+      claudeCommand,
+      ['-p', prompt],
+      claudeTimeoutMs,
+    );
+
+    this.logger.log(`Claude CLI finalizado em ~${Date.now() - startedAt}ms.`);
+
     const parsedJsonPayload = extractJsonPayload(
       rawResponse,
       'Claude CLI retornou resposta vazia.',
@@ -49,11 +61,14 @@ export class ClaudeCliService {
   private runClaudeCommand(
     claudeCommand: string,
     commandArguments: string[],
+    timeoutMs: number,
   ): Promise<string> {
     return new Promise((resolve, reject) => {
       let stdoutOutput = '';
       let stderrOutput = '';
       let claudeProcess: ChildProcessByStdio<null, Readable, Readable>;
+      let forceKillHandle: NodeJS.Timeout | undefined;
+      let isSettled = false;
 
       try {
         claudeProcess = spawn(claudeCommand, commandArguments, {
@@ -68,6 +83,46 @@ export class ClaudeCliService {
         return;
       }
 
+      const timeoutHandle = setTimeout(() => {
+        if (isSettled) {
+          return;
+        }
+
+        isSettled = true;
+        clearTimeout(timeoutHandle);
+        this.logger.error(
+          `Claude CLI excedeu o timeout de ${timeoutMs}ms. Encerrando processo.`,
+        );
+        claudeProcess.kill('SIGTERM');
+        forceKillHandle = setTimeout(() => {
+          if (!claudeProcess.killed) {
+            claudeProcess.kill('SIGKILL');
+          }
+        }, 5000);
+        reject(
+          new InternalServerErrorException(
+            `Claude CLI excedeu o tempo limite de ${timeoutMs}ms.`,
+          ),
+        );
+      }, timeoutMs);
+
+      const clearHandles = () => {
+        clearTimeout(timeoutHandle);
+        if (forceKillHandle) {
+          clearTimeout(forceKillHandle);
+        }
+      };
+
+      const finish = (callback: () => void) => {
+        if (isSettled) {
+          return;
+        }
+
+        isSettled = true;
+        clearHandles();
+        callback();
+      };
+
       claudeProcess.stdout.setEncoding('utf8');
       claudeProcess.stderr.setEncoding('utf8');
 
@@ -79,27 +134,40 @@ export class ClaudeCliService {
       });
 
       claudeProcess.on('error', (error) => {
-        reject(
-          new InternalServerErrorException(
-            `Erro ao executar o Claude CLI: ${error.message}`,
-          ),
-        );
+        clearHandles();
+        finish(() => {
+          reject(
+            new InternalServerErrorException(
+              `Erro ao executar o Claude CLI: ${error.message}`,
+            ),
+          );
+        });
       });
 
       claudeProcess.on('close', (exitCode) => {
+        clearHandles();
+
+        if (isSettled) {
+          return;
+        }
+
         if (exitCode !== 0) {
           this.logger.error(
             `Claude CLI saiu com código ${exitCode}. stderr: ${stderrOutput}`,
           );
-          reject(
-            new InternalServerErrorException(
-              `Claude CLI retornou código ${exitCode}: ${stderrOutput || stdoutOutput || '(sem saída)'}`,
-            ),
-          );
+          finish(() => {
+            reject(
+              new InternalServerErrorException(
+                `Claude CLI retornou código ${exitCode}: ${stderrOutput || stdoutOutput || '(sem saída)'}`,
+              ),
+            );
+          });
           return;
         }
 
-        resolve(stdoutOutput);
+        finish(() => {
+          resolve(stdoutOutput);
+        });
       });
     });
   }

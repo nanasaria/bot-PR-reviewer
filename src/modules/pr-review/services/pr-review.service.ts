@@ -79,7 +79,7 @@ export class PrReviewService {
 
     return {
       prUrl: pullRequestUrl,
-      event: reviewEvent,
+      event: publishedReview.event,
       body: reviewBody,
       confidence: claudeReview.confidence,
       issues: claudeReview.issues,
