@@ -65,9 +65,13 @@ export class PrReviewService {
       changedFiles,
     });
     const claudeReview = await this.runReviewWithFallback(reviewPrompt);
+    const normalizedReview = this.applyRequiredPullRequestDescriptionRule(
+      claudeReview,
+      pullRequestSummary.body,
+    );
 
-    const reviewEvent = this.determineReviewEvent(claudeReview);
-    const reviewBody = this.buildPublishedReviewBody(claudeReview);
+    const reviewEvent = this.determineReviewEvent(normalizedReview);
+    const reviewBody = this.buildPublishedReviewBody(normalizedReview);
 
     const publishedReview = await this.gitHubService.publishReview(
       owner,
@@ -75,14 +79,15 @@ export class PrReviewService {
       pullRequestNumber,
       reviewBody,
       reviewEvent,
+      pullRequestSummary.author,
     );
 
     return {
       prUrl: pullRequestUrl,
-      event: reviewEvent,
+      event: publishedReview.event,
       body: reviewBody,
-      confidence: claudeReview.confidence,
-      issues: claudeReview.issues,
+      confidence: normalizedReview.confidence,
+      issues: normalizedReview.issues,
       review: publishedReview,
     };
   }
@@ -128,6 +133,26 @@ export class PrReviewService {
     return buildPullRequestReviewPrompt(reviewContext);
   }
 
+  private applyRequiredPullRequestDescriptionRule(
+    claudeReview: ClaudeReview,
+    pullRequestDescription: string | null,
+  ): ClaudeReview {
+    if (pullRequestDescription?.trim()) {
+      return claudeReview;
+    }
+
+    this.logger.warn('PR sem descrição. Forçando REQUEST_CHANGES.');
+
+    return {
+      ...claudeReview,
+      decision: 'REQUEST_CHANGES',
+      body: this.ensureMissingPullRequestDescriptionNote(claudeReview.body),
+      issues: this.ensureMissingPullRequestDescriptionIssue(
+        claudeReview.issues,
+      ),
+    };
+  }
+
   private async runReviewWithFallback(
     reviewPrompt: string,
   ): Promise<ClaudeReview> {
@@ -168,6 +193,54 @@ export class PrReviewService {
     return `${trimmedReviewBody}\n\n**Pontos identificados:**\n${formattedIssues}`;
   }
 
+  private ensureMissingPullRequestDescriptionNote(reviewBody: string): string {
+    const trimmedReviewBody = reviewBody.trim();
+
+    if (this.mentionsMissingPullRequestDescription(trimmedReviewBody)) {
+      return trimmedReviewBody;
+    }
+
+    return `${trimmedReviewBody}\n\nAlém disso, o PR está sem descrição. Adicione uma descrição resumindo o contexto, o que foi alterado e os principais impactos antes do merge.`;
+  }
+
+  private ensureMissingPullRequestDescriptionIssue(
+    issues: ClaudeIssue[],
+  ): ClaudeIssue[] {
+    const existingIssueIndex = issues.findIndex((issue) =>
+      this.mentionsMissingPullRequestDescription(
+        `${issue.file} ${issue.reason}`,
+      ),
+    );
+
+    if (existingIssueIndex === -1) {
+      return [
+        ...issues,
+        {
+          severity: 'medium',
+          file: 'Descrição do PR',
+          reason:
+            'O PR está sem descrição. Adicione contexto, resumo das mudanças e impactos antes do merge.',
+        },
+      ];
+    }
+
+    const existingIssue = issues[existingIssueIndex];
+    if (
+      existingIssue.severity === 'medium' ||
+      existingIssue.severity === 'high'
+    ) {
+      return issues;
+    }
+
+    const updatedIssues = [...issues];
+    updatedIssues[existingIssueIndex] = {
+      ...existingIssue,
+      severity: 'medium',
+    };
+
+    return updatedIssues;
+  }
+
   private hasBlockingIssue(claudeReview: ClaudeReview): boolean {
     return claudeReview.issues.some(
       (issue) => issue.severity === 'high' || issue.severity === 'medium',
@@ -183,5 +256,17 @@ export class PrReviewService {
 
   private formatIssueSummary(issue: ClaudeIssue): string {
     return `- [${issue.severity.toUpperCase()}] ${issue.file}: ${issue.reason}`;
+  }
+
+  private mentionsMissingPullRequestDescription(text: string): boolean {
+    const normalizedText = text.toLowerCase();
+    const mentionsDescription = /descri[cç][aã]o|description/.test(
+      normalizedText,
+    );
+    const mentionsGap = /falt|aus[eê]ncia|sem |vazi|missing|nao |não /.test(
+      normalizedText,
+    );
+
+    return mentionsDescription && mentionsGap;
   }
 }

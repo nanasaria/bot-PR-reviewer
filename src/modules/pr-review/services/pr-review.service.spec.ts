@@ -1,5 +1,8 @@
 import { InternalServerErrorException } from '@nestjs/common';
-import type { GitHubPublishedReview } from '../../github/models/github-pull-request.model';
+import type {
+  GitHubPublishedReview,
+  GitHubPullRequestSummary,
+} from '../../github/models/github-pull-request.model';
 import { GitHubService } from '../../github/services/github.service';
 import { ClaudeCliService } from '../../claude-cli/services/claude-cli.service';
 import { OllamaService } from '../../ollama/services/ollama.service';
@@ -113,7 +116,7 @@ describe('PrReviewService.determineReviewEvent', () => {
 
 describe('PrReviewService.reviewPullRequest', () => {
   const pullRequestUrl = 'https://github.com/acme/widgets/pull/42';
-  const pullRequestSummary = {
+  const pullRequestSummary: GitHubPullRequestSummary = {
     title: 'Improve PR review flow',
     body: 'Adds safer fallback',
     author: 'notro',
@@ -138,16 +141,20 @@ describe('PrReviewService.reviewPullRequest', () => {
   const publishedReview: GitHubPublishedReview = {
     id: 10,
     htmlUrl: 'https://github.com/acme/widgets/pull/42#pullrequestreview-10',
+    event: 'COMMENT',
   };
 
-  const buildService = () => {
+  const buildService = (options?: {
+    pullRequestSummary?: GitHubPullRequestSummary;
+  }) => {
+    const reviewSummary = options?.pullRequestSummary ?? pullRequestSummary;
     const gitHubServiceMock: jest.Mocked<
       Pick<
         GitHubService,
         'getPullRequestSummary' | 'listPullRequestFiles' | 'publishReview'
       >
     > = {
-      getPullRequestSummary: jest.fn().mockResolvedValue(pullRequestSummary),
+      getPullRequestSummary: jest.fn().mockResolvedValue(reviewSummary),
       listPullRequestFiles: jest.fn().mockResolvedValue(changedFiles),
       publishReview: jest.fn().mockResolvedValue(publishedReview),
     };
@@ -203,8 +210,46 @@ describe('PrReviewService.reviewPullRequest', () => {
       42,
       'Fallback local executado',
       'COMMENT',
+      'notro',
     );
     expect(result.review).toEqual(publishedReview);
+    expect(result.event).toBe('COMMENT');
+  });
+
+  it('força REQUEST_CHANGES quando o PR está sem descrição', async () => {
+    const { prReviewService, gitHubServiceMock, claudeCliServiceMock } =
+      buildService({
+        pullRequestSummary: {
+          ...pullRequestSummary,
+          body: null,
+        },
+      });
+
+    claudeCliServiceMock.runReview.mockResolvedValue({
+      decision: 'APPROVE',
+      body: 'A implementação parece segura.',
+      issues: [],
+      confidence: 'high',
+    });
+
+    const result = await prReviewService.reviewPullRequest(pullRequestUrl);
+
+    expect(gitHubServiceMock.publishReview).toHaveBeenCalledWith(
+      'acme',
+      'widgets',
+      42,
+      expect.stringContaining('PR está sem descrição'),
+      'REQUEST_CHANGES',
+      'notro',
+    );
+    expect(result.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          severity: 'medium',
+          file: 'Descrição do PR',
+        }),
+      ]),
+    );
   });
 
   it('não usa fallback do Ollama para erro diferente de limite', async () => {
@@ -243,5 +288,26 @@ describe('PrReviewService.reviewPullRequest', () => {
     );
     expect(ollamaServiceMock.runReview).toHaveBeenCalledTimes(1);
     expect(gitHubServiceMock.publishReview).not.toHaveBeenCalled();
+  });
+
+  it('retorna o evento realmente publicado pelo GitHub', async () => {
+    const { prReviewService, gitHubServiceMock, claudeCliServiceMock } =
+      buildService();
+
+    claudeCliServiceMock.runReview.mockResolvedValue({
+      decision: 'REQUEST_CHANGES',
+      body: 'Há um problema importante',
+      issues: [{ severity: 'high', file: 'src/app.ts', reason: 'bug' }],
+      confidence: 'high',
+    });
+    gitHubServiceMock.publishReview.mockResolvedValue({
+      ...publishedReview,
+      event: 'COMMENT',
+    });
+
+    const result = await prReviewService.reviewPullRequest(pullRequestUrl);
+
+    expect(result.event).toBe('COMMENT');
+    expect(result.review.event).toBe('COMMENT');
   });
 });

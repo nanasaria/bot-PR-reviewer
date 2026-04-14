@@ -21,6 +21,10 @@ type MockReadableStream = EventEmitter & {
 type MockClaudeProcess = EventEmitter & {
   stdout: MockReadableStream;
   stderr: MockReadableStream;
+  kill: jest.Mock<boolean, [NodeJS.Signals?]>;
+  killed: boolean;
+  exitCode: number | null;
+  signalCode: NodeJS.Signals | null;
 };
 
 function createMockReadableStream(): MockReadableStream {
@@ -33,6 +37,16 @@ function createMockClaudeProcess(): MockClaudeProcess {
   const mockProcess = new EventEmitter() as MockClaudeProcess;
   mockProcess.stdout = createMockReadableStream();
   mockProcess.stderr = createMockReadableStream();
+  mockProcess.killed = false;
+  mockProcess.exitCode = null;
+  mockProcess.signalCode = null;
+  mockProcess.kill = jest.fn((signal?: NodeJS.Signals) => {
+    if (signal) {
+      mockProcess.killed = true;
+    }
+
+    return true;
+  });
   return mockProcess;
 }
 
@@ -41,9 +55,17 @@ describe('ClaudeCliService', () => {
 
   const buildService = (claudeCommand = 'claude-test'): ClaudeCliService => {
     const configServiceMock = {
-      get: jest.fn((key: string) =>
-        key === 'CLAUDE_COMMAND' ? claudeCommand : undefined,
-      ),
+      get: jest.fn((key: string) => {
+        if (key === 'CLAUDE_COMMAND') {
+          return claudeCommand;
+        }
+
+        if (key === 'CLAUDE_TIMEOUT_MS') {
+          return 120000;
+        }
+
+        return undefined;
+      }),
     };
 
     return new ClaudeCliService(configServiceMock as never);
@@ -51,6 +73,10 @@ describe('ClaudeCliService', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
   });
 
   it('executa o Claude CLI configurado e retorna a review validada', async () => {
@@ -69,10 +95,11 @@ describe('ClaudeCliService', () => {
         confidence: 'high',
       },
     );
-    expect(runClaudeCommandSpy).toHaveBeenCalledWith('claude-custom', [
-      '-p',
-      'revise este PR',
-    ]);
+    expect(runClaudeCommandSpy).toHaveBeenCalledWith(
+      'claude-custom',
+      ['-p', 'revise este PR'],
+      120000,
+    );
   });
 
   it('lança erro quando a resposta do Claude CLI não passa no schema', async () => {
@@ -96,9 +123,10 @@ describe('ClaudeCliService', () => {
         runClaudeCommand: (
           claudeCommand: string,
           commandArguments: string[],
+          timeoutMs: number,
         ) => Promise<string>;
       }
-    ).runClaudeCommand('claude', ['-p', 'prompt']);
+    ).runClaudeCommand('claude', ['-p', 'prompt'], 120000);
 
     mockProcess.stdout.emit('data', '{"resultado":');
     mockProcess.stdout.emit('data', '"ok"}');
@@ -123,9 +151,10 @@ describe('ClaudeCliService', () => {
         runClaudeCommand: (
           claudeCommand: string,
           commandArguments: string[],
+          timeoutMs: number,
         ) => Promise<string>;
       }
-    ).runClaudeCommand('claude', ['-p', 'prompt']);
+    ).runClaudeCommand('claude', ['-p', 'prompt'], 120000);
 
     mockProcess.stderr.emit('data', 'limite excedido');
     mockProcess.emit('close', 1);
@@ -145,9 +174,10 @@ describe('ClaudeCliService', () => {
         runClaudeCommand: (
           claudeCommand: string,
           commandArguments: string[],
+          timeoutMs: number,
         ) => Promise<string>;
       }
-    ).runClaudeCommand('claude', ['-p', 'prompt']);
+    ).runClaudeCommand('claude', ['-p', 'prompt'], 120000);
 
     mockProcess.emit('error', new Error('spawn ENOENT'));
 
@@ -168,11 +198,50 @@ describe('ClaudeCliService', () => {
           runClaudeCommand: (
             claudeCommand: string,
             commandArguments: string[],
+            timeoutMs: number,
           ) => Promise<string>;
         }
-      ).runClaudeCommand('claude', ['-p', 'prompt']),
+      ).runClaudeCommand('claude', ['-p', 'prompt'], 120000),
     ).rejects.toThrow(
       'Falha ao executar o Claude CLI (claude): binário não encontrado',
     );
+  });
+
+  it('encerra o processo, remove listeners e força SIGKILL após timeout', async () => {
+    jest.useFakeTimers();
+
+    const claudeCliService = buildService();
+    const mockProcess = createMockClaudeProcess();
+    mockSpawn.mockReturnValue(mockProcess as never);
+
+    const commandPromise = (
+      claudeCliService as unknown as {
+        runClaudeCommand: (
+          claudeCommand: string,
+          commandArguments: string[],
+          timeoutMs: number,
+        ) => Promise<string>;
+      }
+    ).runClaudeCommand('claude', ['-p', 'prompt'], 100);
+
+    expect(mockProcess.listenerCount('error')).toBe(1);
+    expect(mockProcess.listenerCount('close')).toBe(1);
+    expect(mockProcess.stdout.listenerCount('data')).toBe(1);
+    expect(mockProcess.stderr.listenerCount('data')).toBe(1);
+
+    jest.advanceTimersByTime(100);
+
+    await expect(commandPromise).rejects.toThrow(
+      'Claude CLI excedeu o tempo limite de 100ms.',
+    );
+    expect(mockProcess.kill).toHaveBeenCalledWith('SIGTERM');
+    expect(mockProcess.listenerCount('error')).toBe(0);
+    expect(mockProcess.listenerCount('close')).toBe(0);
+    expect(mockProcess.stdout.listenerCount('data')).toBe(0);
+    expect(mockProcess.stderr.listenerCount('data')).toBe(0);
+
+    jest.advanceTimersByTime(5000);
+
+    expect(mockProcess.kill).toHaveBeenCalledWith('SIGKILL');
   });
 });
