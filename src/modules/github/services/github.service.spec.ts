@@ -2,11 +2,15 @@ const mockPullsGet = jest.fn();
 const mockPullsListFiles = jest.fn();
 const mockPullsCreateReview = jest.fn();
 const mockPaginate = jest.fn();
+const mockUsersGetAuthenticated = jest.fn();
 const mockOctokit = jest.fn().mockImplementation(() => ({
   pulls: {
     get: mockPullsGet,
     listFiles: mockPullsListFiles,
     createReview: mockPullsCreateReview,
+  },
+  users: {
+    getAuthenticated: mockUsersGetAuthenticated,
   },
   paginate: mockPaginate,
 }));
@@ -38,6 +42,9 @@ describe('GitHubService', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    mockUsersGetAuthenticated.mockResolvedValue({
+      data: { login: 'notro' },
+    });
   });
 
   it('instancia Octokit com token e baseUrl configurados', () => {
@@ -180,7 +187,183 @@ describe('GitHubService', () => {
     ).resolves.toEqual({
       id: 15,
       htmlUrl: 'https://github.com/acme/widgets/pull/42#pullrequestreview-15',
+      event: 'COMMENT',
     });
+  });
+
+  it('rebaixa preventivamente APPROVE para COMMENT ao identificar PR próprio', async () => {
+    const gitHubService = buildService();
+    mockPullsCreateReview.mockResolvedValue({
+      data: {
+        id: 16,
+        html_url:
+          'https://github.com/acme/widgets/pull/42#pullrequestreview-16',
+      },
+    });
+
+    await expect(
+      gitHubService.publishReview(
+        'acme',
+        'widgets',
+        42,
+        'Review pronta',
+        'APPROVE',
+        'notro',
+      ),
+    ).resolves.toEqual({
+      id: 16,
+      htmlUrl: 'https://github.com/acme/widgets/pull/42#pullrequestreview-16',
+      event: 'COMMENT',
+    });
+
+    expect(mockUsersGetAuthenticated).toHaveBeenCalledTimes(1);
+    expect(mockPullsCreateReview).toHaveBeenCalledTimes(1);
+    expect(mockPullsCreateReview).toHaveBeenCalledWith({
+      owner: 'acme',
+      repo: 'widgets',
+      pull_number: 42,
+      body: 'Review pronta',
+      event: 'COMMENT',
+    });
+  });
+
+  it('rebaixa REQUEST_CHANGES para COMMENT ao revisar o próprio PR', async () => {
+    const gitHubService = buildService();
+    mockPullsCreateReview
+      .mockRejectedValueOnce(
+        Object.assign(new Error('Unprocessable Entity'), {
+          status: 422,
+          response: {
+            data: {
+              message: 'Validation Failed',
+              errors: [
+                {
+                  message: 'Cannot request changes on your own pull request',
+                },
+              ],
+            },
+          },
+        }),
+      )
+      .mockResolvedValueOnce({
+        data: {
+          id: 16,
+          html_url:
+            'https://github.com/acme/widgets/pull/42#pullrequestreview-16',
+        },
+      });
+
+    await expect(
+      gitHubService.publishReview(
+        'acme',
+        'widgets',
+        42,
+        'Review pronta',
+        'REQUEST_CHANGES',
+      ),
+    ).resolves.toEqual({
+      id: 16,
+      htmlUrl: 'https://github.com/acme/widgets/pull/42#pullrequestreview-16',
+      event: 'COMMENT',
+    });
+
+    expect(mockPullsCreateReview).toHaveBeenNthCalledWith(1, {
+      owner: 'acme',
+      repo: 'widgets',
+      pull_number: 42,
+      body: 'Review pronta',
+      event: 'REQUEST_CHANGES',
+    });
+    expect(mockPullsCreateReview).toHaveBeenNthCalledWith(2, {
+      owner: 'acme',
+      repo: 'widgets',
+      pull_number: 42,
+      body: 'Review pronta',
+      event: 'COMMENT',
+    });
+  });
+
+  it('rebaixa APPROVE para COMMENT ao revisar o próprio PR', async () => {
+    const gitHubService = buildService();
+    mockPullsCreateReview
+      .mockRejectedValueOnce(
+        Object.assign(new Error('Unprocessable Entity'), {
+          status: 422,
+          response: {
+            data: {
+              message: 'Validation Failed',
+              errors: [
+                {
+                  message: 'Review Can not approve your own pull request',
+                },
+              ],
+            },
+          },
+        }),
+      )
+      .mockResolvedValueOnce({
+        data: {
+          id: 17,
+          html_url:
+            'https://github.com/acme/widgets/pull/42#pullrequestreview-17',
+        },
+      });
+
+    await expect(
+      gitHubService.publishReview(
+        'acme',
+        'widgets',
+        42,
+        'Review pronta',
+        'APPROVE',
+      ),
+    ).resolves.toEqual({
+      id: 17,
+      htmlUrl: 'https://github.com/acme/widgets/pull/42#pullrequestreview-17',
+      event: 'COMMENT',
+    });
+
+    expect(mockPullsCreateReview).toHaveBeenNthCalledWith(1, {
+      owner: 'acme',
+      repo: 'widgets',
+      pull_number: 42,
+      body: 'Review pronta',
+      event: 'APPROVE',
+    });
+    expect(mockPullsCreateReview).toHaveBeenNthCalledWith(2, {
+      owner: 'acme',
+      repo: 'widgets',
+      pull_number: 42,
+      body: 'Review pronta',
+      event: 'COMMENT',
+    });
+  });
+
+  it('não rebaixa REQUEST_CHANGES em erro 422 sem indicação de self-review', async () => {
+    const gitHubService = buildService();
+    mockPullsCreateReview.mockRejectedValue(
+      Object.assign(new Error('Validation failed'), {
+        status: 422,
+        response: {
+          data: {
+            message: 'Validation Failed',
+            errors: [{ message: 'Body is too long' }],
+          },
+        },
+      }),
+    );
+
+    await expect(
+      gitHubService.publishReview(
+        'acme',
+        'widgets',
+        42,
+        'Review pronta',
+        'REQUEST_CHANGES',
+      ),
+    ).rejects.toThrow('Não foi possível publicar a review: Validation failed');
+
+    expect(mockPullsCreateReview).toHaveBeenCalledTimes(1);
   });
 
   it('lança erro amigável ao falhar ao publicar review', async () => {

@@ -14,6 +14,7 @@ describe('validateEnv', () => {
       GITHUB_TOKEN: 'github-token',
       GITHUB_API_BASE_URL: 'https://api.github.com',
       CLAUDE_COMMAND: 'claude',
+      CLAUDE_TIMEOUT_MS: 120000,
       OLLAMA_API_BASE_URL: 'http://localhost:11434/api',
       OLLAMA_COMMAND: 'ollama',
       OLLAMA_MODEL: 'qwen3-coder:30b',
@@ -37,5 +38,14 @@ describe('validateEnv', () => {
         PORT: '0',
       }),
     ).toThrow('GITHUB_TOKEN');
+  });
+
+  it('rejeita timeout do Claude abaixo do mínimo suportado', () => {
+    expect(() =>
+      validateEnv({
+        GITHUB_TOKEN: 'github-token',
+        CLAUDE_TIMEOUT_MS: '999',
+      }),
+    ).toThrow('CLAUDE_TIMEOUT_MS');
   });
 });

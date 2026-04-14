@@ -1,3 +1,5 @@
+import type { PullRequestReviewEvent } from './review-event.model';
+
 export interface GitHubPullRequestFile {
   filename: string;
   status: string;
@@ -23,4 +25,5 @@ export interface GitHubPullRequestSummary {
 export interface GitHubPublishedReview {
   id: number;
   htmlUrl: string;
+  event: PullRequestReviewEvent;
 }

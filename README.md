@@ -30,6 +30,7 @@ Edite o `.env` e preencha o `GITHUB_TOKEN`.
 | `GITHUB_TOKEN`               | _(obrigatório)_               | Token pessoal do GitHub para ler PRs e criar reviews.                |
 | `GITHUB_API_BASE_URL`        | `https://api.github.com`      | Base URL da API (útil para GitHub Enterprise).                       |
 | `CLAUDE_COMMAND`             | `claude`                      | Comando do Claude Code CLI.                                          |
+| `CLAUDE_TIMEOUT_MS`          | `120000`                      | Timeout do Claude em milissegundos. Mínimo suportado: `1000`.        |
 | `OLLAMA_API_BASE_URL`        | `http://localhost:11434/api`  | Base URL da API local do Ollama.                                     |
 | `OLLAMA_COMMAND`             | `ollama`                      | Comando usado para executar `ollama serve` no auto-start.            |
 | `OLLAMA_MODEL`               | `qwen3-coder:30b`             | Modelo local usado no fallback.                                      |
