@@ -56,9 +56,7 @@ describe('analyzePullRequestChangeSet', () => {
     );
 
     expect(analysis.hasBackendChanges).toBe(true);
-    expect(analysis.backendFiles).toEqual([
-      'src/modules/auth/auth.service.ts',
-    ]);
+    expect(analysis.backendFiles).toEqual(['src/modules/auth/auth.service.ts']);
   });
 
   it('classifica corretamente quando repositoryName é undefined', () => {
@@ -101,31 +99,29 @@ describe('analyzePullRequestChangeSet', () => {
   });
 
   it('reconhece extensões variadas como back-end (.py, .rs, .go)', () => {
-    const analysis = analyzePullRequestChangeSet(
-      [
-        {
-          filename: 'src/handlers/payment.py',
-          status: 'added',
-          additions: 20,
-          deletions: 0,
-          changes: 20,
-        },
-        {
-          filename: 'src/services/order.rs',
-          status: 'modified',
-          additions: 8,
-          deletions: 3,
-          changes: 11,
-        },
-        {
-          filename: 'src/api/health.go',
-          status: 'added',
-          additions: 15,
-          deletions: 0,
-          changes: 15,
-        },
-      ],
-    );
+    const analysis = analyzePullRequestChangeSet([
+      {
+        filename: 'src/handlers/payment.py',
+        status: 'added',
+        additions: 20,
+        deletions: 0,
+        changes: 20,
+      },
+      {
+        filename: 'src/services/order.rs',
+        status: 'modified',
+        additions: 8,
+        deletions: 3,
+        changes: 11,
+      },
+      {
+        filename: 'src/api/health.go',
+        status: 'added',
+        additions: 15,
+        deletions: 0,
+        changes: 15,
+      },
+    ]);
 
     expect(analysis.hasBackendChanges).toBe(true);
     expect(analysis.backendFiles).toEqual([
@@ -160,9 +156,7 @@ describe('analyzePullRequestChangeSet', () => {
     expect(analysis.backendFiles).toContain(
       'packages/public-api/src/routes/users.ts',
     );
-    expect(analysis.backendFiles).toContain(
-      'packages/crons/src/jobs/sync.ts',
-    );
+    expect(analysis.backendFiles).toContain('packages/crons/src/jobs/sync.ts');
   });
 
   it('reconhece pacote webapp do orc-lite como front-end', () => {
