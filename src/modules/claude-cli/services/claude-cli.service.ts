@@ -24,19 +24,12 @@ export class ClaudeCliService {
       this.configService.get<string>('CLAUDE_COMMAND') ?? 'claude';
     const claudeTimeoutMs =
       this.configService.get<number>('CLAUDE_TIMEOUT_MS') ?? 120000;
-    const startedAt = Date.now();
-
-    this.logger.log(
-      `Executando Claude CLI com timeout de ${claudeTimeoutMs}ms.`,
-    );
 
     const rawResponse = await this.runClaudeCommand(
       claudeCommand,
       ['-p', prompt],
       claudeTimeoutMs,
     );
-
-    this.logger.log(`Claude CLI finalizado em ~${Date.now() - startedAt}ms.`);
 
     const parsedJsonPayload = extractJsonPayload(
       rawResponse,
@@ -64,11 +57,14 @@ export class ClaudeCliService {
     timeoutMs: number,
   ): Promise<string> {
     return new Promise((resolve, reject) => {
+      const startedAt = Date.now();
       let stdoutOutput = '';
       let stderrOutput = '';
       let claudeProcess: ChildProcessByStdio<null, Readable, Readable>;
       let forceKillHandle: NodeJS.Timeout | undefined;
       let isSettled = false;
+
+      this.logger.log(`Executando Claude CLI com timeout de ${timeoutMs}ms.`);
 
       try {
         claudeProcess = spawn(claudeCommand, commandArguments, {
@@ -89,9 +85,8 @@ export class ClaudeCliService {
         }
 
         isSettled = true;
-        clearTimeout(timeoutHandle);
         this.logger.error(
-          `Claude CLI excedeu o timeout de ${timeoutMs}ms. Encerrando processo.`,
+          `Claude CLI excedeu o timeout de ${timeoutMs}ms após ~${Date.now() - startedAt}ms. Encerrando processo.`,
         );
         claudeProcess.kill('SIGTERM');
         forceKillHandle = setTimeout(() => {
@@ -153,7 +148,7 @@ export class ClaudeCliService {
 
         if (exitCode !== 0) {
           this.logger.error(
-            `Claude CLI saiu com código ${exitCode}. stderr: ${stderrOutput}`,
+            `Claude CLI saiu com código ${exitCode} após ~${Date.now() - startedAt}ms. stderr: ${stderrOutput}`,
           );
           finish(() => {
             reject(
@@ -166,6 +161,9 @@ export class ClaudeCliService {
         }
 
         finish(() => {
+          this.logger.log(
+            `Claude CLI finalizado em ~${Date.now() - startedAt}ms.`,
+          );
           resolve(stdoutOutput);
         });
       });
