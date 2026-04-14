@@ -31,12 +31,33 @@ export class EnvironmentConfig {
 
   @IsOptional()
   @IsString()
+  OLLAMA_COMMAND: string = 'ollama';
+
+  @IsOptional()
+  @IsString()
   OLLAMA_MODEL: string = 'qwen3-coder:30b';
 
   @IsOptional()
   @IsInt()
   @Min(1)
   OLLAMA_TIMEOUT_MS: number = 180000;
+
+  @IsOptional()
+  @IsString()
+  OLLAMA_AUTO_START: string = 'true';
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  OLLAMA_STARTUP_TIMEOUT_MS: number = 30000;
+
+  @IsOptional()
+  @IsString()
+  OLLAMA_WARMUP_ON_BOOT: string = 'true';
+
+  @IsOptional()
+  @IsString()
+  OLLAMA_WARMUP_KEEP_ALIVE: string = '10m';
 }
 
 export function validateEnv(

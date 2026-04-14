@@ -24,15 +24,20 @@ Edite o `.env` e preencha o `GITHUB_TOKEN`.
 
 ## Variáveis de ambiente
 
-| Variável              | Default                    | Descrição                                             |
-| --------------------- | -------------------------- | ----------------------------------------------------- |
-| `PORT`                | `3081`                     | Porta HTTP da aplicação.                              |
-| `GITHUB_TOKEN`        | _(obrigatório)_            | Token pessoal do GitHub para ler PRs e criar reviews. |
-| `GITHUB_API_BASE_URL` | `https://api.github.com`   | Base URL da API (útil para GitHub Enterprise).        |
-| `CLAUDE_COMMAND`      | `claude`                   | Comando do Claude Code CLI.                           |
-| `OLLAMA_API_BASE_URL` | `http://localhost:11434/api` | Base URL da API local do Ollama.                    |
-| `OLLAMA_MODEL`        | `qwen3-coder:30b`          | Modelo local usado no fallback.                       |
-| `OLLAMA_TIMEOUT_MS`   | `180000`                   | Timeout do fallback local em milissegundos.           |
+| Variável                     | Default                       | Descrição                                                            |
+| ---------------------------- | ----------------------------- | -------------------------------------------------------------------- |
+| `PORT`                       | `3081`                        | Porta HTTP da aplicação.                                             |
+| `GITHUB_TOKEN`               | _(obrigatório)_               | Token pessoal do GitHub para ler PRs e criar reviews.                |
+| `GITHUB_API_BASE_URL`        | `https://api.github.com`      | Base URL da API (útil para GitHub Enterprise).                       |
+| `CLAUDE_COMMAND`             | `claude`                      | Comando do Claude Code CLI.                                          |
+| `OLLAMA_API_BASE_URL`        | `http://localhost:11434/api`  | Base URL da API local do Ollama.                                     |
+| `OLLAMA_COMMAND`             | `ollama`                      | Comando usado para executar `ollama serve` no auto-start.            |
+| `OLLAMA_MODEL`               | `qwen3-coder:30b`             | Modelo local usado no fallback.                                      |
+| `OLLAMA_TIMEOUT_MS`          | `180000`                      | Timeout das chamadas ao Ollama em milissegundos.                     |
+| `OLLAMA_AUTO_START`          | `true`                        | Tenta subir `ollama serve` automaticamente se a API local não responder. |
+| `OLLAMA_STARTUP_TIMEOUT_MS`  | `30000`                       | Tempo máximo para aguardar o Ollama responder após o auto-start.     |
+| `OLLAMA_WARMUP_ON_BOOT`      | `true`                        | Faz warm-up do modelo configurado durante a inicialização da API.    |
+| `OLLAMA_WARMUP_KEEP_ALIVE`   | `10m`                         | Tempo para manter o modelo carregado após o warm-up (`-1` mantém sempre). |
 
 ## Execução
 
@@ -41,6 +46,19 @@ npm run start:dev
 ```
 
 A aplicação sobe em `http://localhost:3081`.
+
+Ao iniciar, a aplicação tenta preparar o fallback local automaticamente:
+
+1. verifica se o endpoint do Ollama responde
+2. se estiver indisponível e o endpoint for local, tenta executar `ollama serve`
+3. faz um warm-up do `qwen3-coder:30b` via API para reduzir a latência da primeira análise
+
+Se você preferir desabilitar esse comportamento, ajuste no `.env`:
+
+```env
+OLLAMA_AUTO_START=false
+OLLAMA_WARMUP_ON_BOOT=false
+```
 
 ## API
 
@@ -156,4 +174,5 @@ src/
 - **`Configuração de ambiente inválida: ... GITHUB_TOKEN`** → preencha o token no `.env`.
 - **`Claude CLI retornou código ...`** → confirme que `claude --version` funciona no seu shell e que você está autenticado.
 - **`Não foi possível extrair JSON da resposta do Claude CLI`** → a saída não continha JSON parseável; rode manualmente `claude -p "..."` para diagnosticar.
-- **`Falha ao conectar ao Ollama ...`** → confirme que o serviço do Ollama está rodando e que `ollama pull qwen3-coder:30b` já foi executado.
+- **`Falha ao conectar ao Ollama ...`** → confirme que o `ollama` está instalado e acessível no `PATH`. Se não quiser auto-start, desabilite `OLLAMA_AUTO_START`.
+- **`Ollama retornou HTTP 404/503: model not found`** → rode `ollama pull qwen3-coder:30b` para baixar o modelo localmente antes do fallback.
