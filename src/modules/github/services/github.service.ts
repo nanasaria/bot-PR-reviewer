@@ -32,6 +32,8 @@ const SELF_REVIEW_ACTION_PATTERNS: Record<
 };
 const OWN_PULL_REQUEST_PATTERN = /(your|own)\s+pull request/i;
 
+type OwnPullRequestStatus = 'yes' | 'no' | 'unknown';
+
 @Injectable()
 export class GitHubService {
   private readonly logger = new Logger(GitHubService.name);
@@ -157,13 +159,14 @@ export class GitHubService {
     reviewEvent: PullRequestReviewEvent,
     pullRequestAuthor?: string,
   ) {
-    const effectiveReviewEvent = await this.resolveSelfReviewEvent(
-      repositoryOwner,
-      repositoryName,
-      pullRequestNumber,
-      reviewEvent,
-      pullRequestAuthor,
-    );
+    const { effectiveReviewEvent, ownPullRequestStatus } =
+      await this.resolveSelfReviewContext(
+        repositoryOwner,
+        repositoryName,
+        pullRequestNumber,
+        reviewEvent,
+        pullRequestAuthor,
+      );
 
     try {
       const { data } = await this.octokit.pulls.createReview({
@@ -180,7 +183,11 @@ export class GitHubService {
       };
     } catch (error) {
       if (
-        this.shouldDowngradeSelfReviewToComment(error, effectiveReviewEvent)
+        this.shouldDowngradeSelfReviewToComment(
+          error,
+          effectiveReviewEvent,
+          ownPullRequestStatus,
+        )
       ) {
         this.logger.warn(
           `GitHub não permite ${effectiveReviewEvent} no próprio PR. Publicando COMMENT em ${repositoryOwner}/${repositoryName}#${pullRequestNumber}.`,
@@ -204,34 +211,49 @@ export class GitHubService {
     }
   }
 
-  private async resolveSelfReviewEvent(
+  private async resolveSelfReviewContext(
     repositoryOwner: string,
     repositoryName: string,
     pullRequestNumber: number,
     reviewEvent: PullRequestReviewEvent,
     pullRequestAuthor?: string,
-  ): Promise<PullRequestReviewEvent> {
+  ): Promise<{
+    effectiveReviewEvent: PullRequestReviewEvent;
+    ownPullRequestStatus: OwnPullRequestStatus;
+  }> {
     if (reviewEvent === 'COMMENT' || !pullRequestAuthor?.trim()) {
-      return reviewEvent;
+      return {
+        effectiveReviewEvent: reviewEvent,
+        ownPullRequestStatus: 'unknown',
+      };
     }
 
     try {
       const authenticatedUserLogin = await this.getAuthenticatedUserLogin();
       if (!this.isSameGitHubUser(authenticatedUserLogin, pullRequestAuthor)) {
-        return reviewEvent;
+        return {
+          effectiveReviewEvent: reviewEvent,
+          ownPullRequestStatus: 'no',
+        };
       }
 
       this.logger.warn(
         `PR próprio detectado antes da publicação. Rebaixando ${reviewEvent} para COMMENT em ${repositoryOwner}/${repositoryName}#${pullRequestNumber}.`,
       );
-      return 'COMMENT';
+      return {
+        effectiveReviewEvent: 'COMMENT',
+        ownPullRequestStatus: 'yes',
+      };
     } catch (error) {
       this.logger.warn(
         `Não foi possível validar se ${repositoryOwner}/${repositoryName}#${pullRequestNumber} é um PR próprio antes da publicação. Mantendo ${reviewEvent}. Motivo: ${getErrorMessage(
           error,
         )}`,
       );
-      return reviewEvent;
+      return {
+        effectiveReviewEvent: reviewEvent,
+        ownPullRequestStatus: 'unknown',
+      };
     }
   }
 
@@ -268,6 +290,7 @@ export class GitHubService {
   private shouldDowngradeSelfReviewToComment(
     error: unknown,
     reviewEvent: PullRequestReviewEvent,
+    ownPullRequestStatus: OwnPullRequestStatus,
   ): boolean {
     if (reviewEvent === 'COMMENT') {
       return false;
@@ -275,6 +298,14 @@ export class GitHubService {
 
     const errorStatus = this.extractGitHubErrorStatus(error);
     if (errorStatus !== 422) {
+      return false;
+    }
+
+    if (ownPullRequestStatus === 'yes') {
+      return true;
+    }
+
+    if (ownPullRequestStatus === 'no') {
       return false;
     }
 
