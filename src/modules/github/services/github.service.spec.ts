@@ -188,9 +188,19 @@ describe('GitHubService', () => {
     const gitHubService = buildService();
     mockPullsCreateReview
       .mockRejectedValueOnce(
-        new Error(
-          'Unprocessable Entity: "Review Can not request changes on your own pull request"',
-        ),
+        Object.assign(new Error('Unprocessable Entity'), {
+          status: 422,
+          response: {
+            data: {
+              message: 'Validation Failed',
+              errors: [
+                {
+                  message: 'Cannot request changes on your own pull request',
+                },
+              ],
+            },
+          },
+        }),
       )
       .mockResolvedValueOnce({
         data: {
@@ -228,6 +238,33 @@ describe('GitHubService', () => {
       body: 'Review pronta',
       event: 'COMMENT',
     });
+  });
+
+  it('não rebaixa REQUEST_CHANGES em erro 422 sem indicação de self-review', async () => {
+    const gitHubService = buildService();
+    mockPullsCreateReview.mockRejectedValue(
+      Object.assign(new Error('Validation failed'), {
+        status: 422,
+        response: {
+          data: {
+            message: 'Validation Failed',
+            errors: [{ message: 'Body is too long' }],
+          },
+        },
+      }),
+    );
+
+    await expect(
+      gitHubService.publishReview(
+        'acme',
+        'widgets',
+        42,
+        'Review pronta',
+        'REQUEST_CHANGES',
+      ),
+    ).rejects.toThrow('Não foi possível publicar a review: Validation failed');
+
+    expect(mockPullsCreateReview).toHaveBeenCalledTimes(1);
   });
 
   it('lança erro amigável ao falhar ao publicar review', async () => {

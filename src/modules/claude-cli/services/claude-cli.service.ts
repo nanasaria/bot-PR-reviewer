@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { spawn, type ChildProcessByStdio } from 'node:child_process';
+import { performance } from 'node:perf_hooks';
 import type { Readable } from 'node:stream';
 import { getErrorMessage } from '../../../common/utils/error-message.util';
 import { extractJsonPayload } from '../../../common/utils/json-payload.util';
@@ -57,7 +58,7 @@ export class ClaudeCliService {
     timeoutMs: number,
   ): Promise<string> {
     return new Promise((resolve, reject) => {
-      const startedAt = Date.now();
+      const startedAt = performance.now();
       let stdoutOutput = '';
       let stderrOutput = '';
       let claudeProcess: ChildProcessByStdio<null, Readable, Readable>;
@@ -79,27 +80,7 @@ export class ClaudeCliService {
         return;
       }
 
-      const timeoutHandle = setTimeout(() => {
-        if (isSettled) {
-          return;
-        }
-
-        isSettled = true;
-        this.logger.error(
-          `Claude CLI excedeu o timeout de ${timeoutMs}ms após ~${Date.now() - startedAt}ms. Encerrando processo.`,
-        );
-        claudeProcess.kill('SIGTERM');
-        forceKillHandle = setTimeout(() => {
-          if (!claudeProcess.killed) {
-            claudeProcess.kill('SIGKILL');
-          }
-        }, 5000);
-        reject(
-          new InternalServerErrorException(
-            `Claude CLI excedeu o tempo limite de ${timeoutMs}ms.`,
-          ),
-        );
-      }, timeoutMs);
+      const getElapsedMs = () => Math.round(performance.now() - startedAt);
 
       const clearHandles = () => {
         clearTimeout(timeoutHandle);
@@ -108,6 +89,40 @@ export class ClaudeCliService {
         }
       };
 
+      const removeListeners = () => {
+        claudeProcess.stdout.removeAllListeners('data');
+        claudeProcess.stderr.removeAllListeners('data');
+        claudeProcess.removeAllListeners('error');
+        claudeProcess.removeAllListeners('close');
+      };
+
+      const timeoutHandle = setTimeout(() => {
+        if (isSettled) {
+          return;
+        }
+
+        isSettled = true;
+        removeListeners();
+        this.logger.error(
+          `Claude CLI excedeu o timeout de ${timeoutMs}ms após ~${getElapsedMs()}ms. Encerrando processo.`,
+        );
+        claudeProcess.kill('SIGTERM');
+        forceKillHandle = setTimeout(() => {
+          if (
+            claudeProcess.exitCode === null &&
+            claudeProcess.signalCode === null
+          ) {
+            claudeProcess.kill('SIGKILL');
+          }
+        }, 5000);
+        forceKillHandle.unref?.();
+        reject(
+          new InternalServerErrorException(
+            `Claude CLI excedeu o tempo limite de ${timeoutMs}ms.`,
+          ),
+        );
+      }, timeoutMs);
+
       const finish = (callback: () => void) => {
         if (isSettled) {
           return;
@@ -115,6 +130,7 @@ export class ClaudeCliService {
 
         isSettled = true;
         clearHandles();
+        removeListeners();
         callback();
       };
 
@@ -129,7 +145,6 @@ export class ClaudeCliService {
       });
 
       claudeProcess.on('error', (error) => {
-        clearHandles();
         finish(() => {
           reject(
             new InternalServerErrorException(
@@ -140,15 +155,13 @@ export class ClaudeCliService {
       });
 
       claudeProcess.on('close', (exitCode) => {
-        clearHandles();
-
         if (isSettled) {
           return;
         }
 
         if (exitCode !== 0) {
           this.logger.error(
-            `Claude CLI saiu com código ${exitCode} após ~${Date.now() - startedAt}ms. stderr: ${stderrOutput}`,
+            `Claude CLI saiu com código ${exitCode} após ~${getElapsedMs()}ms. stderr: ${stderrOutput}`,
           );
           finish(() => {
             reject(
@@ -161,9 +174,7 @@ export class ClaudeCliService {
         }
 
         finish(() => {
-          this.logger.log(
-            `Claude CLI finalizado em ~${Date.now() - startedAt}ms.`,
-          );
+          this.logger.log(`Claude CLI finalizado em ~${getElapsedMs()}ms.`);
           resolve(stdoutOutput);
         });
       });

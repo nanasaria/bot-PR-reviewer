@@ -13,8 +13,13 @@ import type {
 } from '../models/github-pull-request.model';
 import type { PullRequestReviewEvent } from '../models/review-event.model';
 
-const OWN_PULL_REQUEST_REVIEW_ERROR_MESSAGE =
-  'Review Can not request changes on your own pull request';
+const SELF_REVIEW_REQUEST_CHANGES_PATTERNS = [
+  /review can(?:not|\s+not)? request changes on your own pull request/i,
+  /cannot request changes on your own pull request/i,
+  /can not request changes on your own pull request/i,
+];
+const REQUEST_CHANGES_PATTERN = /request changes/i;
+const OWN_PULL_REQUEST_PATTERN = /(your|own)\s+pull request/i;
 
 @Injectable()
 export class GitHubService {
@@ -182,9 +187,85 @@ export class GitHubService {
       return false;
     }
 
-    return getErrorMessage(error).includes(
-      OWN_PULL_REQUEST_REVIEW_ERROR_MESSAGE,
-    );
+    const errorStatus = this.extractGitHubErrorStatus(error);
+    if (errorStatus !== 422) {
+      return false;
+    }
+
+    return this.extractGitHubErrorDetails(error).some((errorDetail) => {
+      if (
+        SELF_REVIEW_REQUEST_CHANGES_PATTERNS.some((pattern) =>
+          pattern.test(errorDetail),
+        )
+      ) {
+        return true;
+      }
+
+      return (
+        REQUEST_CHANGES_PATTERN.test(errorDetail) &&
+        OWN_PULL_REQUEST_PATTERN.test(errorDetail)
+      );
+    });
+  }
+
+  private extractGitHubErrorStatus(error: unknown): number | undefined {
+    if (typeof error !== 'object' || error === null || !('status' in error)) {
+      return undefined;
+    }
+
+    const { status } = error as { status?: unknown };
+    return typeof status === 'number' ? status : undefined;
+  }
+
+  private extractGitHubErrorDetails(error: unknown): string[] {
+    const errorDetails = new Set<string>([getErrorMessage(error)]);
+
+    if (typeof error !== 'object' || error === null || !('response' in error)) {
+      return [...errorDetails];
+    }
+
+    const response = (error as { response?: { data?: unknown } }).response;
+    const responseData = response?.data;
+
+    if (typeof responseData === 'string') {
+      errorDetails.add(responseData);
+      return [...errorDetails];
+    }
+
+    if (typeof responseData !== 'object' || responseData === null) {
+      return [...errorDetails];
+    }
+
+    const responseMessage = (responseData as { message?: unknown }).message;
+    if (typeof responseMessage === 'string') {
+      errorDetails.add(responseMessage);
+    }
+
+    const responseErrors = (responseData as { errors?: unknown }).errors;
+    if (Array.isArray(responseErrors)) {
+      responseErrors.forEach((responseError) => {
+        if (typeof responseError === 'string') {
+          errorDetails.add(responseError);
+          return;
+        }
+
+        if (typeof responseError !== 'object' || responseError === null) {
+          return;
+        }
+
+        const errorMessage = (responseError as { message?: unknown }).message;
+        if (typeof errorMessage === 'string') {
+          errorDetails.add(errorMessage);
+        }
+
+        const errorCode = (responseError as { code?: unknown }).code;
+        if (typeof errorCode === 'string') {
+          errorDetails.add(errorCode);
+        }
+      });
+    }
+
+    return [...errorDetails];
   }
 
   private throwGitHubOperationError(

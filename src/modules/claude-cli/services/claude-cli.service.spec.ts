@@ -23,6 +23,8 @@ type MockClaudeProcess = EventEmitter & {
   stderr: MockReadableStream;
   kill: jest.Mock<boolean, [NodeJS.Signals?]>;
   killed: boolean;
+  exitCode: number | null;
+  signalCode: NodeJS.Signals | null;
 };
 
 function createMockReadableStream(): MockReadableStream {
@@ -36,6 +38,8 @@ function createMockClaudeProcess(): MockClaudeProcess {
   mockProcess.stdout = createMockReadableStream();
   mockProcess.stderr = createMockReadableStream();
   mockProcess.killed = false;
+  mockProcess.exitCode = null;
+  mockProcess.signalCode = null;
   mockProcess.kill = jest.fn((signal?: NodeJS.Signals) => {
     if (signal) {
       mockProcess.killed = true;
@@ -69,6 +73,10 @@ describe('ClaudeCliService', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
   });
 
   it('executa o Claude CLI configurado e retorna a review validada', async () => {
@@ -199,7 +207,7 @@ describe('ClaudeCliService', () => {
     );
   });
 
-  it('encerra o processo quando o Claude CLI excede o timeout', async () => {
+  it('encerra o processo, remove listeners e força SIGKILL após timeout', async () => {
     jest.useFakeTimers();
 
     const claudeCliService = buildService();
@@ -216,11 +224,24 @@ describe('ClaudeCliService', () => {
       }
     ).runClaudeCommand('claude', ['-p', 'prompt'], 100);
 
+    expect(mockProcess.listenerCount('error')).toBe(1);
+    expect(mockProcess.listenerCount('close')).toBe(1);
+    expect(mockProcess.stdout.listenerCount('data')).toBe(1);
+    expect(mockProcess.stderr.listenerCount('data')).toBe(1);
+
     jest.advanceTimersByTime(100);
 
     await expect(commandPromise).rejects.toThrow(
       'Claude CLI excedeu o tempo limite de 100ms.',
     );
     expect(mockProcess.kill).toHaveBeenCalledWith('SIGTERM');
+    expect(mockProcess.listenerCount('error')).toBe(0);
+    expect(mockProcess.listenerCount('close')).toBe(0);
+    expect(mockProcess.stdout.listenerCount('data')).toBe(0);
+    expect(mockProcess.stderr.listenerCount('data')).toBe(0);
+
+    jest.advanceTimersByTime(5000);
+
+    expect(mockProcess.kill).toHaveBeenCalledWith('SIGKILL');
   });
 });

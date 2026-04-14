@@ -39,4 +39,13 @@ describe('validateEnv', () => {
       }),
     ).toThrow('GITHUB_TOKEN');
   });
+
+  it('rejeita timeout do Claude abaixo do mínimo suportado', () => {
+    expect(() =>
+      validateEnv({
+        GITHUB_TOKEN: 'github-token',
+        CLAUDE_TIMEOUT_MS: '999',
+      }),
+    ).toThrow('CLAUDE_TIMEOUT_MS');
+  });
 });
