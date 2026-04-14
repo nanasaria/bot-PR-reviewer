@@ -1,6 +1,7 @@
 import { InternalServerErrorException } from '@nestjs/common';
 import type {
   GitHubPublishedReview,
+  GitHubPullRequestFile,
   GitHubPullRequestSummary,
 } from '../../github/models/github-pull-request.model';
 import { GitHubService } from '../../github/services/github.service';
@@ -128,9 +129,9 @@ describe('PrReviewService.reviewPullRequest', () => {
     additions: 12,
     deletions: 4,
   };
-  const changedFiles = [
+  const changedFiles: GitHubPullRequestFile[] = [
     {
-      filename: 'src/app.ts',
+      filename: 'src/components/Button.tsx',
       status: 'modified',
       additions: 12,
       deletions: 4,
@@ -146,8 +147,12 @@ describe('PrReviewService.reviewPullRequest', () => {
 
   const buildService = (options?: {
     pullRequestSummary?: GitHubPullRequestSummary;
+    changedFiles?: GitHubPullRequestFile[];
+    publishedReview?: GitHubPublishedReview;
   }) => {
     const reviewSummary = options?.pullRequestSummary ?? pullRequestSummary;
+    const reviewFiles = options?.changedFiles ?? changedFiles;
+    const reviewPublication = options?.publishedReview ?? publishedReview;
     const gitHubServiceMock: jest.Mocked<
       Pick<
         GitHubService,
@@ -155,8 +160,8 @@ describe('PrReviewService.reviewPullRequest', () => {
       >
     > = {
       getPullRequestSummary: jest.fn().mockResolvedValue(reviewSummary),
-      listPullRequestFiles: jest.fn().mockResolvedValue(changedFiles),
-      publishReview: jest.fn().mockResolvedValue(publishedReview),
+      listPullRequestFiles: jest.fn().mockResolvedValue(reviewFiles),
+      publishReview: jest.fn().mockResolvedValue(reviewPublication),
     };
     const claudeCliServiceMock: jest.Mocked<
       Pick<ClaudeCliService, 'runReview'>
@@ -250,6 +255,101 @@ describe('PrReviewService.reviewPullRequest', () => {
         }),
       ]),
     );
+  });
+
+  it('força REQUEST_CHANGES quando há alteração de back-end sem testes automatizados', async () => {
+    const backendChangedFiles: GitHubPullRequestFile[] = [
+      {
+        filename: 'src/modules/payments/payment.service.ts',
+        status: 'modified',
+        additions: 18,
+        deletions: 3,
+        changes: 21,
+        patch: '@@ -10,6 +10,14 @@',
+      },
+    ];
+    const { prReviewService, gitHubServiceMock, claudeCliServiceMock } =
+      buildService({
+        changedFiles: backendChangedFiles,
+        publishedReview: {
+          ...publishedReview,
+          event: 'REQUEST_CHANGES',
+        },
+      });
+
+    claudeCliServiceMock.runReview.mockResolvedValue({
+      decision: 'APPROVE',
+      body: 'A implementação parece consistente, mas vale acompanhar a estabilidade em produção.',
+      issues: [],
+      confidence: 'high',
+    });
+
+    const result = await prReviewService.reviewPullRequest(pullRequestUrl);
+
+    expect(gitHubServiceMock.publishReview).toHaveBeenCalledWith(
+      'acme',
+      'widgets',
+      42,
+      expect.stringContaining(
+        'sem trazer testes automatizados para validar os cenários alterados',
+      ),
+      'REQUEST_CHANGES',
+      'notro',
+    );
+    expect(result.event).toBe('REQUEST_CHANGES');
+    expect(result.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          severity: 'medium',
+          file: 'src/modules/payments/payment.service.ts',
+          reason:
+            'O PR altera comportamento de back-end sem incluir testes automatizados cobrindo os cenários alterados.',
+        }),
+      ]),
+    );
+  });
+
+  it('não força mudança obrigatória por falta de testes em PR apenas de front-end', async () => {
+    const frontendChangedFiles: GitHubPullRequestFile[] = [
+      {
+        filename: 'src/app/core/services/analytics.service.ts',
+        status: 'modified',
+        additions: 14,
+        deletions: 2,
+        changes: 16,
+        patch: '@@ -1,3 +1,8 @@',
+      },
+    ];
+    const { prReviewService, gitHubServiceMock, claudeCliServiceMock } =
+      buildService({
+        changedFiles: frontendChangedFiles,
+        publishedReview: {
+          ...publishedReview,
+          event: 'APPROVE',
+        },
+      });
+
+    claudeCliServiceMock.runReview.mockResolvedValue({
+      decision: 'APPROVE',
+      body: 'A mudança parece segura para merge.',
+      issues: [],
+      confidence: 'high',
+    });
+
+    const result = await prReviewService.reviewPullRequest(
+      'https://github.com/acme/webapp/pull/42',
+    );
+
+    expect(gitHubServiceMock.publishReview).toHaveBeenCalledWith(
+      'acme',
+      'webapp',
+      42,
+      'A mudança parece segura para merge.',
+      'APPROVE',
+      'notro',
+    );
+    expect(result.event).toBe('APPROVE');
+    expect(result.issues).toEqual([]);
   });
 
   it('não usa fallback do Ollama para erro diferente de limite', async () => {
