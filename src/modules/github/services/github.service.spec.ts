@@ -240,6 +240,62 @@ describe('GitHubService', () => {
     });
   });
 
+  it('rebaixa APPROVE para COMMENT ao revisar o próprio PR', async () => {
+    const gitHubService = buildService();
+    mockPullsCreateReview
+      .mockRejectedValueOnce(
+        Object.assign(new Error('Unprocessable Entity'), {
+          status: 422,
+          response: {
+            data: {
+              message: 'Validation Failed',
+              errors: [
+                {
+                  message: 'Review Can not approve your own pull request',
+                },
+              ],
+            },
+          },
+        }),
+      )
+      .mockResolvedValueOnce({
+        data: {
+          id: 17,
+          html_url:
+            'https://github.com/acme/widgets/pull/42#pullrequestreview-17',
+        },
+      });
+
+    await expect(
+      gitHubService.publishReview(
+        'acme',
+        'widgets',
+        42,
+        'Review pronta',
+        'APPROVE',
+      ),
+    ).resolves.toEqual({
+      id: 17,
+      htmlUrl: 'https://github.com/acme/widgets/pull/42#pullrequestreview-17',
+      event: 'COMMENT',
+    });
+
+    expect(mockPullsCreateReview).toHaveBeenNthCalledWith(1, {
+      owner: 'acme',
+      repo: 'widgets',
+      pull_number: 42,
+      body: 'Review pronta',
+      event: 'APPROVE',
+    });
+    expect(mockPullsCreateReview).toHaveBeenNthCalledWith(2, {
+      owner: 'acme',
+      repo: 'widgets',
+      pull_number: 42,
+      body: 'Review pronta',
+      event: 'COMMENT',
+    });
+  });
+
   it('não rebaixa REQUEST_CHANGES em erro 422 sem indicação de self-review', async () => {
     const gitHubService = buildService();
     mockPullsCreateReview.mockRejectedValue(

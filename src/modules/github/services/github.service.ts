@@ -13,12 +13,23 @@ import type {
 } from '../models/github-pull-request.model';
 import type { PullRequestReviewEvent } from '../models/review-event.model';
 
+const SELF_REVIEW_APPROVE_PATTERNS = [
+  /review can(?:not|\s+not)? approve your own pull request/i,
+  /cannot approve your own pull request/i,
+  /can not approve your own pull request/i,
+];
 const SELF_REVIEW_REQUEST_CHANGES_PATTERNS = [
   /review can(?:not|\s+not)? request changes on your own pull request/i,
   /cannot request changes on your own pull request/i,
   /can not request changes on your own pull request/i,
 ];
-const REQUEST_CHANGES_PATTERN = /request changes/i;
+const SELF_REVIEW_ACTION_PATTERNS: Record<
+  Exclude<PullRequestReviewEvent, 'COMMENT'>,
+  RegExp
+> = {
+  APPROVE: /approve/i,
+  REQUEST_CHANGES: /request changes/i,
+};
 const OWN_PULL_REQUEST_PATTERN = /(your|own)\s+pull request/i;
 
 @Injectable()
@@ -158,7 +169,7 @@ export class GitHubService {
     } catch (error) {
       if (this.shouldDowngradeSelfReviewToComment(error, reviewEvent)) {
         this.logger.warn(
-          `GitHub não permite REQUEST_CHANGES no próprio PR. Publicando COMMENT em ${repositoryOwner}/${repositoryName}#${pullRequestNumber}.`,
+          `GitHub não permite ${reviewEvent} no próprio PR. Publicando COMMENT em ${repositoryOwner}/${repositoryName}#${pullRequestNumber}.`,
         );
 
         const { data } = await this.octokit.pulls.createReview({
@@ -183,7 +194,7 @@ export class GitHubService {
     error: unknown,
     reviewEvent: PullRequestReviewEvent,
   ): boolean {
-    if (reviewEvent !== 'REQUEST_CHANGES') {
+    if (reviewEvent === 'COMMENT') {
       return false;
     }
 
@@ -194,7 +205,7 @@ export class GitHubService {
 
     return this.extractGitHubErrorDetails(error).some((errorDetail) => {
       if (
-        SELF_REVIEW_REQUEST_CHANGES_PATTERNS.some((pattern) =>
+        this.getSelfReviewPatterns(reviewEvent).some((pattern) =>
           pattern.test(errorDetail),
         )
       ) {
@@ -202,10 +213,21 @@ export class GitHubService {
       }
 
       return (
-        REQUEST_CHANGES_PATTERN.test(errorDetail) &&
+        SELF_REVIEW_ACTION_PATTERNS[reviewEvent].test(errorDetail) &&
         OWN_PULL_REQUEST_PATTERN.test(errorDetail)
       );
     });
+  }
+
+  private getSelfReviewPatterns(
+    reviewEvent: Exclude<PullRequestReviewEvent, 'COMMENT'>,
+  ): RegExp[] {
+    switch (reviewEvent) {
+      case 'APPROVE':
+        return SELF_REVIEW_APPROVE_PATTERNS;
+      case 'REQUEST_CHANGES':
+        return SELF_REVIEW_REQUEST_CHANGES_PATTERNS;
+    }
   }
 
   private extractGitHubErrorStatus(error: unknown): number | undefined {
