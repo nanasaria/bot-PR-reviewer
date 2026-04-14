@@ -8,6 +8,7 @@ import { getErrorMessage } from '../../../common/utils/error-message.util';
 import { isClaudeUsageLimitError } from '../../claude-cli/utils/claude-limit-error.util';
 import { GitHubService } from '../../github/services/github.service';
 import type { PullRequestReviewEvent } from '../../github/models/review-event.model';
+import type { GitHubPullRequestFile } from '../../github/models/github-pull-request.model';
 import { ClaudeCliService } from '../../claude-cli/services/claude-cli.service';
 import { OllamaService } from '../../ollama/services/ollama.service';
 import type { ClaudeIssue, ClaudeReview } from '../models/claude-review.model';
@@ -17,6 +18,7 @@ import {
 } from '../models/pull-request-reference.model';
 import type { PullRequestReviewPromptModel } from '../models/pull-request-review-prompt.model';
 import type { ReviewOutcomeModel } from '../models/review-outcome.model';
+import { analyzePullRequestChangeSet } from '../utils/change-set-analysis.util';
 import { buildPullRequestReviewPrompt } from '../utils/review-prompt.util';
 
 @Injectable()
@@ -65,9 +67,15 @@ export class PrReviewService {
       changedFiles,
     });
     const claudeReview = await this.runReviewWithFallback(reviewPrompt);
-    const normalizedReview = this.applyRequiredPullRequestDescriptionRule(
-      claudeReview,
-      pullRequestSummary.body,
+    const reviewWithRequiredDescription =
+      this.applyRequiredPullRequestDescriptionRule(
+        claudeReview,
+        pullRequestSummary.body,
+      );
+    const normalizedReview = this.applyRequiredBackendTestRule(
+      reviewWithRequiredDescription,
+      changedFiles,
+      repositoryName,
     );
 
     const reviewEvent = this.determineReviewEvent(normalizedReview);
@@ -149,6 +157,38 @@ export class PrReviewService {
       body: this.ensureMissingPullRequestDescriptionNote(claudeReview.body),
       issues: this.ensureMissingPullRequestDescriptionIssue(
         claudeReview.issues,
+      ),
+    };
+  }
+
+  private applyRequiredBackendTestRule(
+    claudeReview: ClaudeReview,
+    changedFiles: GitHubPullRequestFile[],
+    repositoryName: string,
+  ): ClaudeReview {
+    const changeSetAnalysis = analyzePullRequestChangeSet(
+      changedFiles,
+      repositoryName,
+    );
+
+    if (
+      !changeSetAnalysis.hasBackendChanges ||
+      changeSetAnalysis.hasTestFiles
+    ) {
+      return claudeReview;
+    }
+
+    this.logger.warn(
+      'PR com alterações de back-end sem testes automatizados no diff. Forçando REQUEST_CHANGES.',
+    );
+
+    return {
+      ...claudeReview,
+      decision: 'REQUEST_CHANGES',
+      body: this.ensureMissingBackendTestNote(claudeReview.body),
+      issues: this.ensureMissingBackendTestIssue(
+        claudeReview.issues,
+        changeSetAnalysis.backendFiles[0],
       ),
     };
   }
@@ -241,6 +281,53 @@ export class PrReviewService {
     return updatedIssues;
   }
 
+  private ensureMissingBackendTestNote(reviewBody: string): string {
+    const trimmedReviewBody = reviewBody.trim();
+
+    if (this.mentionsMissingBackendTests(trimmedReviewBody)) {
+      return trimmedReviewBody;
+    }
+
+    return `${trimmedReviewBody}\n\nAlém disso, o PR altera comportamento de back-end sem trazer testes automatizados para validar os cenários alterados. Isso precisa ser corrigido antes do merge.`;
+  }
+
+  private ensureMissingBackendTestIssue(
+    issues: ClaudeIssue[],
+    fallbackFile: string,
+  ): ClaudeIssue[] {
+    const existingIssueIndex = issues.findIndex((issue) =>
+      this.mentionsMissingBackendTests(`${issue.file} ${issue.reason}`),
+    );
+
+    if (existingIssueIndex === -1) {
+      return [
+        ...issues,
+        {
+          severity: 'medium',
+          file: fallbackFile,
+          reason:
+            'O PR altera comportamento de back-end sem incluir testes automatizados cobrindo os cenários alterados.',
+        },
+      ];
+    }
+
+    const existingIssue = issues[existingIssueIndex];
+    if (
+      existingIssue.severity === 'medium' ||
+      existingIssue.severity === 'high'
+    ) {
+      return issues;
+    }
+
+    const updatedIssues = [...issues];
+    updatedIssues[existingIssueIndex] = {
+      ...existingIssue,
+      severity: 'medium',
+    };
+
+    return updatedIssues;
+  }
+
   private hasBlockingIssue(claudeReview: ClaudeReview): boolean {
     return claudeReview.issues.some(
       (issue) => issue.severity === 'high' || issue.severity === 'medium',
@@ -268,5 +355,19 @@ export class PrReviewService {
     );
 
     return mentionsDescription && mentionsGap;
+  }
+
+  private mentionsMissingBackendTests(text: string): boolean {
+    const normalizedText = text.toLowerCase();
+    const mentionsTests =
+      /teste|testes|test|spec|specs|cobertura|coverage|unit|unitário|unitario|automatizado/.test(
+        normalizedText,
+      );
+    const mentionsGap =
+      /falt|ausencia|ausência|sem |nao |não |insuficient|missing|necess[aá]ri|adicionar|incluir|obrigat[oó]ri|precisa/.test(
+        normalizedText,
+      );
+
+    return mentionsTests && mentionsGap;
   }
 }
