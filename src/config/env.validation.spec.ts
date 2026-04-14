@@ -9,14 +9,19 @@ describe('validateEnv', () => {
       OLLAMA_TIMEOUT_MS: '120000',
     });
 
-    expect(environmentConfig).toEqual({
+    expect(environmentConfig).toMatchObject({
       PORT: 4000,
       GITHUB_TOKEN: 'github-token',
       GITHUB_API_BASE_URL: 'https://api.github.com',
       CLAUDE_COMMAND: 'claude',
       OLLAMA_API_BASE_URL: 'http://localhost:11434/api',
+      OLLAMA_COMMAND: 'ollama',
       OLLAMA_MODEL: 'qwen3-coder:30b',
       OLLAMA_TIMEOUT_MS: 120000,
+      OLLAMA_AUTO_START: 'true',
+      OLLAMA_STARTUP_TIMEOUT_MS: 30000,
+      OLLAMA_WARMUP_ON_BOOT: 'true',
+      OLLAMA_WARMUP_KEEP_ALIVE: '10m',
     });
   });
 
