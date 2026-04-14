@@ -309,6 +309,55 @@ describe('PrReviewService.reviewPullRequest', () => {
     );
   });
 
+  it('não força REQUEST_CHANGES quando há alteração de back-end COM testes automatizados', async () => {
+    const backendWithTestsFiles: GitHubPullRequestFile[] = [
+      {
+        filename: 'src/modules/payments/payment.service.ts',
+        status: 'modified',
+        additions: 18,
+        deletions: 3,
+        changes: 21,
+        patch: '@@ -10,6 +10,14 @@',
+      },
+      {
+        filename: 'src/modules/payments/payment.service.spec.ts',
+        status: 'modified',
+        additions: 30,
+        deletions: 0,
+        changes: 30,
+        patch: '@@ -1,5 +1,25 @@',
+      },
+    ];
+    const { prReviewService, gitHubServiceMock, claudeCliServiceMock } =
+      buildService({
+        changedFiles: backendWithTestsFiles,
+        publishedReview: {
+          ...publishedReview,
+          event: 'APPROVE',
+        },
+      });
+
+    claudeCliServiceMock.runReview.mockResolvedValue({
+      decision: 'APPROVE',
+      body: 'A implementação está sólida e os testes cobrem os cenários relevantes.',
+      issues: [],
+      confidence: 'high',
+    });
+
+    const result = await prReviewService.reviewPullRequest(pullRequestUrl);
+
+    expect(gitHubServiceMock.publishReview).toHaveBeenCalledWith(
+      'acme',
+      'widgets',
+      42,
+      'A implementação está sólida e os testes cobrem os cenários relevantes.',
+      'APPROVE',
+      'notro',
+    );
+    expect(result.event).toBe('APPROVE');
+    expect(result.issues).toEqual([]);
+  });
+
   it('não força mudança obrigatória por falta de testes em PR apenas de front-end', async () => {
     const frontendChangedFiles: GitHubPullRequestFile[] = [
       {

@@ -9,6 +9,13 @@ export interface PullRequestChangeSetAnalysis {
 
 type RepositoryProfile = 'frontend' | 'backend' | 'mixed' | 'unknown';
 
+/**
+ * Listas de repositórios conhecidos usadas para refinar a classificação de arquivos.
+ * Repositórios não listados aqui recebem o perfil 'unknown' e são classificados
+ * apenas por padrões de nome/extensão, o que pode ser menos preciso.
+ *
+ * Para adicionar um novo repositório: inclua o nome (lowercase) no Set correspondente.
+ */
 const KNOWN_FRONTEND_REPOSITORIES = new Set([
   'dashboards',
   'webapp',

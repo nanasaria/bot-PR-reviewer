@@ -61,6 +61,9 @@ export function buildPullRequestReviewPrompt(
     'Cada item em issues deve apontar um arquivo relevante e explicar o risco prático do problema.',
     'Evite observações genéricas ou superficiais.',
     'A descrição do PR é obrigatória. Se o PR estiver sem descrição ou com descrição vazia, trate isso como mudança obrigatória antes do merge.',
+    // A regra de testes para back-end é intencionalmente duplicada aqui (prompt) e em
+    // applyRequiredBackendTestRule (lógica). O prompt orienta a análise do modelo; a lógica
+    // garante programaticamente que a decisão final respeite a regra mesmo se o modelo falhar.
     'Em alterações de back-end, verifique obrigatoriamente se o PR traz testes automatizados cobrindo o comportamento alterado.',
     'Se houver mudança de back-end sem testes automatizados no diff, trate isso como mudança obrigatória antes do merge e normalmente use REQUEST_CHANGES.',
     'Se houver testes, avalie se eles realmente cobrem os cenários alterados; testes superficiais ou insuficientes também devem ser apontados.',

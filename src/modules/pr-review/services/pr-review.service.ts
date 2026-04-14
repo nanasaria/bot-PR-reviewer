@@ -188,7 +188,7 @@ export class PrReviewService {
       body: this.ensureMissingBackendTestNote(claudeReview.body),
       issues: this.ensureMissingBackendTestIssue(
         claudeReview.issues,
-        changeSetAnalysis.backendFiles[0] ?? 'testes',
+        changeSetAnalysis.backendFiles[0],
       ),
     };
   }
@@ -360,9 +360,11 @@ export class PrReviewService {
   private mentionsMissingBackendTests(text: string): boolean {
     const normalizedText = text.toLowerCase();
     const mentionsTests =
-      /teste|testes|test|spec|specs|cobertura|coverage/.test(normalizedText);
+      /teste|testes|test|spec|specs|cobertura|coverage|unit|unitário|unitario|automatizado/.test(
+        normalizedText,
+      );
     const mentionsGap =
-      /falt|ausencia|ausência|sem |nao |não |insuficient|missing|necess[aá]ri/.test(
+      /falt|ausencia|ausência|sem |nao |não |insuficient|missing|necess[aá]ri|adicionar|incluir|obrigat[oó]ri|precisa/.test(
         normalizedText,
       );
 
