@@ -35,6 +35,7 @@ export function buildPullRequestReviewPrompt(
     changedFilesSection || '(nenhum arquivo)',
     '',
     'Revise focando em: bugs, regressões, edge cases, segurança, performance, legibilidade e necessidade de testes.',
+    'A descrição do PR é obrigatória. Se o PR estiver sem descrição ou com descrição vazia, trate isso como mudança obrigatória antes do merge.',
     '',
     'Regras de decisão:',
     '- use APPROVE somente se não houver nenhuma mudança obrigatória',

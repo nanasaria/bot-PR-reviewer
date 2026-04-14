@@ -2,11 +2,15 @@ const mockPullsGet = jest.fn();
 const mockPullsListFiles = jest.fn();
 const mockPullsCreateReview = jest.fn();
 const mockPaginate = jest.fn();
+const mockUsersGetAuthenticated = jest.fn();
 const mockOctokit = jest.fn().mockImplementation(() => ({
   pulls: {
     get: mockPullsGet,
     listFiles: mockPullsListFiles,
     createReview: mockPullsCreateReview,
+  },
+  users: {
+    getAuthenticated: mockUsersGetAuthenticated,
   },
   paginate: mockPaginate,
 }));
@@ -38,6 +42,9 @@ describe('GitHubService', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    mockUsersGetAuthenticated.mockResolvedValue({
+      data: { login: 'notro' },
+    });
   });
 
   it('instancia Octokit com token e baseUrl configurados', () => {
@@ -180,6 +187,42 @@ describe('GitHubService', () => {
     ).resolves.toEqual({
       id: 15,
       htmlUrl: 'https://github.com/acme/widgets/pull/42#pullrequestreview-15',
+      event: 'COMMENT',
+    });
+  });
+
+  it('rebaixa preventivamente APPROVE para COMMENT ao identificar PR próprio', async () => {
+    const gitHubService = buildService();
+    mockPullsCreateReview.mockResolvedValue({
+      data: {
+        id: 16,
+        html_url:
+          'https://github.com/acme/widgets/pull/42#pullrequestreview-16',
+      },
+    });
+
+    await expect(
+      gitHubService.publishReview(
+        'acme',
+        'widgets',
+        42,
+        'Review pronta',
+        'APPROVE',
+        'notro',
+      ),
+    ).resolves.toEqual({
+      id: 16,
+      htmlUrl: 'https://github.com/acme/widgets/pull/42#pullrequestreview-16',
+      event: 'COMMENT',
+    });
+
+    expect(mockUsersGetAuthenticated).toHaveBeenCalledTimes(1);
+    expect(mockPullsCreateReview).toHaveBeenCalledTimes(1);
+    expect(mockPullsCreateReview).toHaveBeenCalledWith({
+      owner: 'acme',
+      repo: 'widgets',
+      pull_number: 42,
+      body: 'Review pronta',
       event: 'COMMENT',
     });
   });

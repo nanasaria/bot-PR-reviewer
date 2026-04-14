@@ -36,6 +36,7 @@ const OWN_PULL_REQUEST_PATTERN = /(your|own)\s+pull request/i;
 export class GitHubService {
   private readonly logger = new Logger(GitHubService.name);
   private readonly octokit: Octokit;
+  private authenticatedUserLoginPromise?: Promise<string>;
 
   constructor(private readonly configService: ConfigService) {
     const githubToken = this.configService.get<string>('GITHUB_TOKEN');
@@ -121,6 +122,7 @@ export class GitHubService {
     pullRequestNumber: number,
     reviewBody: string,
     reviewEvent: PullRequestReviewEvent,
+    pullRequestAuthor?: string,
   ): Promise<GitHubPublishedReview> {
     try {
       const { reviewEvent: publishedReviewEvent, reviewData } =
@@ -130,6 +132,7 @@ export class GitHubService {
           pullRequestNumber,
           reviewBody,
           reviewEvent,
+          pullRequestAuthor,
         );
 
       return {
@@ -152,24 +155,35 @@ export class GitHubService {
     pullRequestNumber: number,
     reviewBody: string,
     reviewEvent: PullRequestReviewEvent,
+    pullRequestAuthor?: string,
   ) {
+    const effectiveReviewEvent = await this.resolveSelfReviewEvent(
+      repositoryOwner,
+      repositoryName,
+      pullRequestNumber,
+      reviewEvent,
+      pullRequestAuthor,
+    );
+
     try {
       const { data } = await this.octokit.pulls.createReview({
         owner: repositoryOwner,
         repo: repositoryName,
         pull_number: pullRequestNumber,
         body: reviewBody,
-        event: reviewEvent,
+        event: effectiveReviewEvent,
       });
 
       return {
-        reviewEvent,
+        reviewEvent: effectiveReviewEvent,
         reviewData: data,
       };
     } catch (error) {
-      if (this.shouldDowngradeSelfReviewToComment(error, reviewEvent)) {
+      if (
+        this.shouldDowngradeSelfReviewToComment(error, effectiveReviewEvent)
+      ) {
         this.logger.warn(
-          `GitHub não permite ${reviewEvent} no próprio PR. Publicando COMMENT em ${repositoryOwner}/${repositoryName}#${pullRequestNumber}.`,
+          `GitHub não permite ${effectiveReviewEvent} no próprio PR. Publicando COMMENT em ${repositoryOwner}/${repositoryName}#${pullRequestNumber}.`,
         );
 
         const { data } = await this.octokit.pulls.createReview({
@@ -188,6 +202,67 @@ export class GitHubService {
 
       throw error;
     }
+  }
+
+  private async resolveSelfReviewEvent(
+    repositoryOwner: string,
+    repositoryName: string,
+    pullRequestNumber: number,
+    reviewEvent: PullRequestReviewEvent,
+    pullRequestAuthor?: string,
+  ): Promise<PullRequestReviewEvent> {
+    if (reviewEvent === 'COMMENT' || !pullRequestAuthor?.trim()) {
+      return reviewEvent;
+    }
+
+    try {
+      const authenticatedUserLogin = await this.getAuthenticatedUserLogin();
+      if (!this.isSameGitHubUser(authenticatedUserLogin, pullRequestAuthor)) {
+        return reviewEvent;
+      }
+
+      this.logger.warn(
+        `PR próprio detectado antes da publicação. Rebaixando ${reviewEvent} para COMMENT em ${repositoryOwner}/${repositoryName}#${pullRequestNumber}.`,
+      );
+      return 'COMMENT';
+    } catch (error) {
+      this.logger.warn(
+        `Não foi possível validar se ${repositoryOwner}/${repositoryName}#${pullRequestNumber} é um PR próprio antes da publicação. Mantendo ${reviewEvent}. Motivo: ${getErrorMessage(
+          error,
+        )}`,
+      );
+      return reviewEvent;
+    }
+  }
+
+  private getAuthenticatedUserLogin(): Promise<string> {
+    if (!this.authenticatedUserLoginPromise) {
+      this.authenticatedUserLoginPromise = this.octokit.users
+        .getAuthenticated()
+        .then(({ data }) => {
+          const authenticatedUserLogin = data.login?.trim();
+
+          if (!authenticatedUserLogin) {
+            throw new Error(
+              'GitHub não retornou o login do usuário autenticado.',
+            );
+          }
+
+          return authenticatedUserLogin;
+        })
+        .catch((error) => {
+          this.authenticatedUserLoginPromise = undefined;
+          throw error;
+        });
+    }
+
+    return this.authenticatedUserLoginPromise;
+  }
+
+  private isSameGitHubUser(leftUserLogin: string, rightUserLogin: string) {
+    return (
+      leftUserLogin.trim().toLowerCase() === rightUserLogin.trim().toLowerCase()
+    );
   }
 
   private shouldDowngradeSelfReviewToComment(
