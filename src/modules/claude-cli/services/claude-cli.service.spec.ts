@@ -84,13 +84,17 @@ describe('ClaudeCliService', () => {
     const runClaudeCommandSpy = jest
       .spyOn(claudeCliService as never, 'runClaudeCommand')
       .mockResolvedValue(
-        '{"decision":"APPROVE","body":"tudo certo","issues":[],"confidence":"high"}',
+        '{"decision":"APPROVE","overview":"tudo certo","improvements":[],"testsNotes":"os testes cobrem o fluxo principal","negatives":[],"positives":["mudança coesa"],"issues":[],"confidence":"high"}',
       );
 
     await expect(claudeCliService.runReview('revise este PR')).resolves.toEqual(
       {
         decision: 'APPROVE',
-        body: 'tudo certo',
+        overview: 'tudo certo',
+        improvements: [],
+        testsNotes: 'os testes cobrem o fluxo principal',
+        negatives: [],
+        positives: ['mudança coesa'],
         issues: [],
         confidence: 'high',
       },
@@ -106,7 +110,7 @@ describe('ClaudeCliService', () => {
     const claudeCliService = buildService();
     jest
       .spyOn(claudeCliService as never, 'runClaudeCommand')
-      .mockResolvedValue('{"body":"faltou decision"}');
+      .mockResolvedValue('{"overview":"faltou decision"}');
 
     await expect(claudeCliService.runReview('revise este PR')).rejects.toThrow(
       'Resposta inválida do Claude CLI',

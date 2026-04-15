@@ -54,9 +54,12 @@ describe('buildPullRequestReviewPrompt', () => {
       'não misture palavras em inglês quando houver equivalente natural em português',
     );
     expect(prompt).toContain('prefira "caso de borda" em vez de "edge case"');
-    expect(prompt).toContain(
-      'texto final da review em português do Brasil, aprofundado, claro e profissional',
-    );
+    expect(prompt).toContain('Estrutura obrigatória da resposta:');
+    expect(prompt).toContain('- overview: texto corrido');
+    expect(prompt).toContain('- improvements: lista de sugestões concretas');
+    expect(prompt).toContain('- testsNotes: texto corrido avaliando os Testes');
+    expect(prompt).toContain('- negatives: lista de Pontos Negativos');
+    expect(prompt).toContain('- positives: lista de Pontos Positivos');
     expect(prompt).toContain(
       'Contexto inferido automaticamente a partir do diff:',
     );

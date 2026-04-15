@@ -10,20 +10,32 @@ import { OllamaService } from '../../ollama/services/ollama.service';
 import { PrReviewService } from './pr-review.service';
 import type { ClaudeReview } from '../models/claude-review.model';
 
+const buildClaudeReview = (
+  overrides: Partial<ClaudeReview> = {},
+): ClaudeReview => ({
+  decision: 'APPROVE',
+  overview: 'A implementação atende à proposta do PR.',
+  improvements: [],
+  testsNotes: 'Os testes cobrem os cenários relevantes para a mudança.',
+  negatives: [],
+  positives: [],
+  issues: [],
+  confidence: 'high',
+  ...overrides,
+});
+
+function expectStructuredReviewSections(reviewBody: string): void {
+  expect(reviewBody).toContain('**Visão Geral**');
+  expect(reviewBody).toContain('**Melhorias**');
+  expect(reviewBody).toContain('**Testes**');
+  expect(reviewBody).toContain('**Pontos Negativos**');
+  expect(reviewBody).toContain('**Pontos Positivos**');
+}
+
 describe('PrReviewService.determineReviewEvent', () => {
   const prReviewService = Object.create(
     PrReviewService.prototype,
   ) as PrReviewService;
-
-  const buildClaudeReview = (
-    overrides: Partial<ClaudeReview> = {},
-  ): ClaudeReview => ({
-    decision: 'APPROVE',
-    body: 'ok',
-    issues: [],
-    confidence: 'high',
-    ...overrides,
-  });
 
   it('APPROVE sem issues nem low-confidence => APPROVE', () => {
     expect(prReviewService.determineReviewEvent(buildClaudeReview())).toBe(
@@ -193,12 +205,12 @@ describe('PrReviewService.reviewPullRequest', () => {
       claudeCliServiceMock,
       ollamaServiceMock,
     } = buildService();
-    const ollamaReview: ClaudeReview = {
+    const ollamaReview: ClaudeReview = buildClaudeReview({
       decision: 'COMMENT',
-      body: 'Fallback local executado',
-      issues: [],
+      overview: 'Fallback local executado',
       confidence: 'medium',
-    };
+      positives: ['O fallback local evita falha total da análise.'],
+    });
 
     claudeCliServiceMock.runReview.mockRejectedValue(
       new InternalServerErrorException("you've hit limit"),
@@ -209,14 +221,18 @@ describe('PrReviewService.reviewPullRequest', () => {
 
     expect(claudeCliServiceMock.runReview).toHaveBeenCalledTimes(1);
     expect(ollamaServiceMock.runReview).toHaveBeenCalledTimes(1);
+    const publishedBody = gitHubServiceMock.publishReview.mock.calls[0]?.[3];
+
     expect(gitHubServiceMock.publishReview).toHaveBeenCalledWith(
       'acme',
       'widgets',
       42,
-      'Fallback local executado',
+      expect.any(String),
       'COMMENT',
       'notro',
     );
+    expectStructuredReviewSections(publishedBody);
+    expect(publishedBody).toContain('Fallback local executado');
     expect(result.review).toEqual(publishedReview);
     expect(result.event).toBe('COMMENT');
   });
@@ -230,23 +246,27 @@ describe('PrReviewService.reviewPullRequest', () => {
         },
       });
 
-    claudeCliServiceMock.runReview.mockResolvedValue({
-      decision: 'APPROVE',
-      body: 'A implementação parece segura.',
-      issues: [],
-      confidence: 'high',
-    });
+    claudeCliServiceMock.runReview.mockResolvedValue(
+      buildClaudeReview({
+        overview: 'A implementação parece segura.',
+        positives: ['A mudança é objetiva e fácil de acompanhar.'],
+      }),
+    );
 
     const result = await prReviewService.reviewPullRequest(pullRequestUrl);
+    const publishedBody = gitHubServiceMock.publishReview.mock.calls[0]?.[3];
 
     expect(gitHubServiceMock.publishReview).toHaveBeenCalledWith(
       'acme',
       'widgets',
       42,
-      expect.stringContaining('PR está sem descrição'),
+      expect.any(String),
       'REQUEST_CHANGES',
       'notro',
     );
+    expectStructuredReviewSections(publishedBody);
+    expect(publishedBody).toContain('**Pontos Negativos**');
+    expect(publishedBody).toContain('O PR está sem descrição');
     expect(result.issues).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -277,24 +297,28 @@ describe('PrReviewService.reviewPullRequest', () => {
         },
       });
 
-    claudeCliServiceMock.runReview.mockResolvedValue({
-      decision: 'APPROVE',
-      body: 'A implementação parece consistente, mas vale acompanhar a estabilidade em produção.',
-      issues: [],
-      confidence: 'high',
-    });
+    claudeCliServiceMock.runReview.mockResolvedValue(
+      buildClaudeReview({
+        overview:
+          'A implementação parece consistente, mas vale acompanhar a estabilidade em produção.',
+      }),
+    );
 
     const result = await prReviewService.reviewPullRequest(pullRequestUrl);
+    const publishedBody = gitHubServiceMock.publishReview.mock.calls[0]?.[3];
 
     expect(gitHubServiceMock.publishReview).toHaveBeenCalledWith(
       'acme',
       'widgets',
       42,
-      expect.stringContaining(
-        'sem trazer testes automatizados para validar os cenários alterados',
-      ),
+      expect.any(String),
       'REQUEST_CHANGES',
       'notro',
+    );
+    expectStructuredReviewSections(publishedBody);
+    expect(publishedBody).toContain('**Testes**');
+    expect(publishedBody).toContain(
+      'sem trazer testes automatizados para validar os cenários alterados',
     );
     expect(result.event).toBe('REQUEST_CHANGES');
     expect(result.issues).toEqual(
@@ -337,23 +361,28 @@ describe('PrReviewService.reviewPullRequest', () => {
         },
       });
 
-    claudeCliServiceMock.runReview.mockResolvedValue({
-      decision: 'APPROVE',
-      body: 'A implementação está sólida e os testes cobrem os cenários relevantes.',
-      issues: [],
-      confidence: 'high',
-    });
+    claudeCliServiceMock.runReview.mockResolvedValue(
+      buildClaudeReview({
+        overview: 'A implementação está sólida.',
+        testsNotes: 'Os testes cobrem os cenários relevantes.',
+        positives: ['A cobertura automatizada acompanha a mudança.'],
+      }),
+    );
 
     const result = await prReviewService.reviewPullRequest(pullRequestUrl);
+    const publishedBody = gitHubServiceMock.publishReview.mock.calls[0]?.[3];
 
     expect(gitHubServiceMock.publishReview).toHaveBeenCalledWith(
       'acme',
       'widgets',
       42,
-      'A implementação está sólida e os testes cobrem os cenários relevantes.',
+      expect.any(String),
       'APPROVE',
       'notro',
     );
+    expectStructuredReviewSections(publishedBody);
+    expect(publishedBody).toContain('A implementação está sólida.');
+    expect(publishedBody).toContain('Os testes cobrem os cenários relevantes.');
     expect(result.event).toBe('APPROVE');
     expect(result.issues).toEqual([]);
   });
@@ -378,25 +407,28 @@ describe('PrReviewService.reviewPullRequest', () => {
         },
       });
 
-    claudeCliServiceMock.runReview.mockResolvedValue({
-      decision: 'APPROVE',
-      body: 'A mudança parece segura para merge.',
-      issues: [],
-      confidence: 'high',
-    });
+    claudeCliServiceMock.runReview.mockResolvedValue(
+      buildClaudeReview({
+        overview: 'A mudança parece segura para merge.',
+        positives: ['O impacto está concentrado no fluxo de interface.'],
+      }),
+    );
 
     const result = await prReviewService.reviewPullRequest(
       'https://github.com/acme/webapp/pull/42',
     );
+    const publishedBody = gitHubServiceMock.publishReview.mock.calls[0]?.[3];
 
     expect(gitHubServiceMock.publishReview).toHaveBeenCalledWith(
       'acme',
       'webapp',
       42,
-      'A mudança parece segura para merge.',
+      expect.any(String),
       'APPROVE',
       'notro',
     );
+    expectStructuredReviewSections(publishedBody);
+    expect(publishedBody).toContain('A mudança parece segura para merge.');
     expect(result.event).toBe('APPROVE');
     expect(result.issues).toEqual([]);
   });
@@ -443,12 +475,14 @@ describe('PrReviewService.reviewPullRequest', () => {
     const { prReviewService, gitHubServiceMock, claudeCliServiceMock } =
       buildService();
 
-    claudeCliServiceMock.runReview.mockResolvedValue({
-      decision: 'REQUEST_CHANGES',
-      body: 'Há um problema importante',
-      issues: [{ severity: 'high', file: 'src/app.ts', reason: 'bug' }],
-      confidence: 'high',
-    });
+    claudeCliServiceMock.runReview.mockResolvedValue(
+      buildClaudeReview({
+        decision: 'REQUEST_CHANGES',
+        overview: 'Há um problema importante',
+        negatives: ['Existe um risco funcional que bloqueia o merge.'],
+        issues: [{ severity: 'high', file: 'src/app.ts', reason: 'bug' }],
+      }),
+    );
     gitHubServiceMock.publishReview.mockResolvedValue({
       ...publishedReview,
       event: 'COMMENT',

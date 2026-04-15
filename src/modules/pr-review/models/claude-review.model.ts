@@ -16,7 +16,11 @@ export const ClaudeIssueSchema = z.object({
 
 export const ClaudeReviewSchema = z.object({
   decision: ClaudeReviewDecisionSchema,
-  body: z.string().min(1),
+  overview: z.string().min(1),
+  improvements: z.array(z.string().min(1)).default([]),
+  testsNotes: z.string().min(1),
+  negatives: z.array(z.string().min(1)).default([]),
+  positives: z.array(z.string().min(1)).default([]),
   issues: z.array(ClaudeIssueSchema).default([]),
   confidence: ClaudeReviewConfidenceSchema,
 });

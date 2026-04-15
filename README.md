@@ -10,7 +10,7 @@
 - `claude` CLI instalado, autenticado e disponível no `PATH`
 - `Ollama` instalado localmente
 - Modelo de fallback baixado localmente: `ollama pull qwen3-coder:30b`
-- Um Personal Access Token do GitHub com permissão para ler o PR alvo e publicar reviews (escopo `repo` para repositórios privados; `public_repo` para públicos)
+- Um Personal Access Token do GitHub com acesso ao repositório alvo e permissão para ler PRs e publicar reviews
 
 ## Instalação
 
@@ -173,6 +173,11 @@ src/
 ## Troubleshooting
 
 - **`Configuração de ambiente inválida: ... GITHUB_TOKEN`** → preencha o token no `.env`.
+- **`Não foi possível buscar o PR no GitHub: Not Found...`** → normalmente indica uma destas causas:
+  1. a URL ou o número do PR está incorreto
+  2. o token não tem acesso ao repositório alvo
+  3. o token ainda não foi autorizado na organização via SSO
+  4. em token fine-grained, o repositório alvo não foi incluído ou a permissão de Pull Requests não cobre leitura/escrita
 - **`Claude CLI retornou código ...`** → confirme que `claude --version` funciona no seu shell e que você está autenticado.
 - **`Não foi possível extrair JSON da resposta do Claude CLI`** → a saída não continha JSON parseável; rode manualmente `claude -p "..."` para diagnosticar.
 - **`Falha ao conectar ao Ollama ...`** → confirme que o `ollama` está instalado e acessível no `PATH`. Se não quiser auto-start, desabilite `OLLAMA_AUTO_START`.
