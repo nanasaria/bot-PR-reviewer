@@ -80,25 +80,89 @@ export function buildPullRequestReviewPrompt(
     '- mantenha em inglês apenas nomes de arquivos, identificadores, comandos, APIs, mensagens literais e termos sem tradução natural',
     '- prefira "caso de borda" em vez de "edge case", "mudanças necessárias" em vez de "request changes", e assim por diante',
     '',
-    'Regras para o campo body:',
-    '- escreva um resumo final mais aprofundado, com os principais motivos da decisão',
-    '- não repita a lista completa de issues no body; ela já irá separadamente',
-    '- se aprovar, explique por que a mudança parece segura',
-    '- se pedir mudanças, deixe claro o impacto e o que precisa ser corrigido antes do merge',
-    '- se faltar teste em mudança de back-end, diga isso explicitamente no body',
-    '- se faltar descrição no PR, diga isso explicitamente no body',
+    'Estrutura obrigatória da resposta:',
+    '- overview: texto corrido (2 a 4 parágrafos curtos) com a Visão Geral do PR — o que ele tenta fazer, se cumpre a proposta e o principal motivo da decisão',
+    '- improvements: lista de sugestões concretas de melhoria no código (cada item é uma string curta e acionável). Pode ficar vazia se não houver sugestões além das issues',
+    '- testsNotes: texto corrido avaliando os Testes — cobertura, qualidade, cenários faltantes. Se faltar teste em mudança de back-end, diga isso explicitamente aqui',
+    '- negatives: lista de Pontos Negativos objetivos (cada item é uma string curta). Se o PR estiver sem descrição, inclua isso aqui',
+    '- positives: lista de Pontos Positivos objetivos (cada item é uma string curta). Pode ficar vazia se o PR não tiver pontos positivos claros',
+    '- issues: problemas concretos ancorados em arquivo, usados para a Tabela de Riscos. Evite duplicar itens de improvements aqui — issues são riscos, improvements são sugestões',
     '',
     'Responda APENAS com JSON puro (sem markdown, sem prosa, sem cercas de código), no formato:',
     '{',
     '  "decision": "APPROVE" | "REQUEST_CHANGES" | "COMMENT",',
-    '  "body": "texto final da review em português do Brasil, aprofundado, claro e profissional",',
+    '  "overview": "texto da Visão Geral em português do Brasil",',
+    '  "improvements": ["sugestão 1", "sugestão 2"],',
+    '  "testsNotes": "texto sobre Testes em português do Brasil",',
+    '  "negatives": ["ponto negativo 1", "ponto negativo 2"],',
+    '  "positives": ["ponto positivo 1", "ponto positivo 2"],',
     '  "issues": [',
     '    { "severity": "high" | "medium" | "low", "file": "caminho/arquivo", "reason": "descrição" }',
     '  ],',
     '  "confidence": "high" | "medium" | "low"',
     '}',
     '',
-    'Antes de responder, faça uma checagem silenciosa para confirmar que o JSON está válido e que o texto está todo em português do Brasil, exceto identificadores técnicos.',
+    'Antes de responder, faça uma checagem silenciosa para confirmar que o JSON está válido, que todos os campos obrigatórios estão preenchidos e que o texto está todo em português do Brasil, exceto identificadores técnicos.',
+  ].join('\n');
+}
+
+export function buildSimplifiedPullRequestReviewPrompt(
+  reviewContext: PullRequestReviewPromptModel,
+): string {
+  const {
+    repositoryOwner,
+    repositoryName,
+    pullRequestNumber,
+    pullRequestSummary,
+    changedFiles,
+  } = reviewContext;
+
+  const changedFilesSection = changedFiles
+    .map((changedFile) => formatChangedFileSection(changedFile))
+    .join('\n\n');
+  const changeSetAnalysis = analyzePullRequestChangeSet(
+    changedFiles,
+    repositoryName,
+  );
+
+  return [
+    'Você é uma revisora técnica de Pull Requests do GitHub. Responda em português do Brasil.',
+    '',
+    `Repositório: ${repositoryOwner}/${repositoryName}`,
+    `PR #${pullRequestNumber}: ${pullRequestSummary.title}`,
+    `Autor: ${pullRequestSummary.author} | Estado: ${pullRequestSummary.state}${pullRequestSummary.draft ? ' (draft)' : ''}`,
+    `Arquivos alterados: ${pullRequestSummary.changedFiles} | +${pullRequestSummary.additions}/-${pullRequestSummary.deletions}`,
+    '',
+    'Descrição do PR:',
+    pullRequestSummary.body?.trim()
+      ? pullRequestSummary.body
+      : '(sem descrição)',
+    '',
+    'Contexto do diff:',
+    `- back-end: ${changeSetAnalysis.hasBackendChanges ? 'sim' : 'não'}`,
+    `- front-end: ${changeSetAnalysis.hasFrontendChanges ? 'sim' : 'não'}`,
+    `- testes no PR: ${changeSetAnalysis.hasTestFiles ? 'sim' : 'não'}`,
+    '',
+    'Arquivos e diffs:',
+    changedFilesSection || '(nenhum arquivo)',
+    '',
+    'Regras importantes:',
+    '- APPROVE só se não houver nada bloqueante; REQUEST_CHANGES se houver algo a corrigir antes do merge; COMMENT se inconclusivo.',
+    '- Se for back-end sem testes no diff, use REQUEST_CHANGES.',
+    '- Se o PR estiver sem descrição, use REQUEST_CHANGES e mencione isso em negatives.',
+    '',
+    'Responda APENAS com JSON puro no formato abaixo. Sem markdown, sem cercas, sem texto extra.',
+    'Campos obrigatórios: todos. Use arrays vazios se não houver itens.',
+    '{',
+    '  "decision": "APPROVE" | "REQUEST_CHANGES" | "COMMENT",',
+    '  "overview": "resumo curto do PR e motivo da decisão",',
+    '  "improvements": ["sugestão curta 1", "..."],',
+    '  "testsNotes": "avaliação dos testes em 1-2 frases",',
+    '  "negatives": ["ponto negativo 1", "..."],',
+    '  "positives": ["ponto positivo 1", "..."],',
+    '  "issues": [ { "severity": "high" | "medium" | "low", "file": "caminho", "reason": "por quê" } ],',
+    '  "confidence": "high" | "medium" | "low"',
+    '}',
   ].join('\n');
 }
 

@@ -1,7 +1,12 @@
 import {
+  ForbiddenException,
+  HttpException,
+  HttpStatus,
   Injectable,
   InternalServerErrorException,
   Logger,
+  NotFoundException,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Octokit } from '@octokit/rest';
@@ -401,10 +406,83 @@ export class GitHubService {
     userMessage: string,
     error: unknown,
   ): never {
+    const errorStatus = this.extractGitHubErrorStatus(error);
     const errorMessage = getErrorMessage(error);
     const errorStack = error instanceof Error ? error.stack : undefined;
+    const errorDetails = this.extractGitHubErrorDetails(error);
+    const operationException = this.buildGitHubOperationException(
+      userMessage,
+      errorStatus,
+      errorDetails,
+      errorMessage,
+    );
 
-    this.logger.error(`${logMessage}: ${errorMessage}`, errorStack);
-    throw new InternalServerErrorException(`${userMessage}: ${errorMessage}`);
+    this.logger.error(
+      `${logMessage}: ${operationException.message} (erro original do GitHub: ${errorMessage})`,
+      errorStack,
+    );
+    throw operationException;
+  }
+
+  private getPrimaryGitHubErrorDetail(
+    errorDetails: string[],
+    fallbackMessage: string,
+  ): string {
+    const preferredErrorDetail = errorDetails.find(
+      (errorDetail) =>
+        !/https?:\/\/docs\.github\.com/i.test(errorDetail) &&
+        errorDetail.trim().length > 0,
+    );
+
+    return preferredErrorDetail?.trim() || fallbackMessage;
+  }
+
+  private isGitHubRateLimitError(errorDetails: string[]): boolean {
+    return errorDetails.some((errorDetail) =>
+      /rate limit|secondary rate limit|api rate limit exceeded/i.test(
+        errorDetail,
+      ),
+    );
+  }
+
+  private buildGitHubOperationException(
+    userMessage: string,
+    errorStatus: number | undefined,
+    errorDetails: string[],
+    fallbackMessage: string,
+  ) {
+    const primaryErrorDetail = this.getPrimaryGitHubErrorDetail(
+      errorDetails,
+      fallbackMessage,
+    );
+
+    switch (errorStatus) {
+      case 401:
+        return new UnauthorizedException(
+          `${userMessage}: ${primaryErrorDetail}. Verifique se o GITHUB_TOKEN está válido e não expirou.`,
+        );
+
+      case 403:
+        if (this.isGitHubRateLimitError(errorDetails)) {
+          return new HttpException(
+            `${userMessage}: ${primaryErrorDetail}. O limite da API do GitHub foi atingido; aguarde e tente novamente.`,
+            HttpStatus.TOO_MANY_REQUESTS,
+          );
+        }
+
+        return new ForbiddenException(
+          `${userMessage}: ${primaryErrorDetail}. Verifique se o token tem permissão suficiente e se foi autorizado na organização, caso o repositório use SSO.`,
+        );
+
+      case 404:
+        return new NotFoundException(
+          `${userMessage}: ${primaryErrorDetail}. O PR pode não existir, o repositório pode estar inacessível para esse token, ou o token pode não ter sido autorizado na organização.`,
+        );
+
+      default:
+        return new InternalServerErrorException(
+          `${userMessage}: ${primaryErrorDetail}`,
+        );
+    }
   }
 }

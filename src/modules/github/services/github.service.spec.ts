@@ -1,3 +1,9 @@
+import {
+  ForbiddenException,
+  HttpException,
+  NotFoundException,
+  UnauthorizedException,
+} from '@nestjs/common';
 const mockPullsGet = jest.fn();
 const mockPullsListFiles = jest.fn();
 const mockPullsCreateReview = jest.fn();
@@ -124,6 +130,30 @@ describe('GitHubService', () => {
     );
   });
 
+  it('traduz 404 do GitHub ao buscar resumo do PR', async () => {
+    const gitHubService = buildService();
+    mockPullsGet.mockRejectedValue(
+      Object.assign(new Error('Not Found - https://docs.github.com/rest'), {
+        status: 404,
+        response: {
+          data: {
+            message: 'Not Found',
+          },
+        },
+      }),
+    );
+
+    await expect(
+      gitHubService.getPullRequestSummary('acme', 'widgets', 42),
+    ).rejects.toBeInstanceOf(NotFoundException);
+
+    await expect(
+      gitHubService.getPullRequestSummary('acme', 'widgets', 42),
+    ).rejects.toThrow(
+      'Não foi possível buscar o PR no GitHub: Not Found. O PR pode não existir, o repositório pode estar inacessível para esse token, ou o token pode não ter sido autorizado na organização.',
+    );
+  });
+
   it('lista e mapeia os arquivos alterados do pull request', async () => {
     const gitHubService = buildService();
     mockPaginate.mockResolvedValue([
@@ -164,6 +194,30 @@ describe('GitHubService', () => {
     await expect(
       gitHubService.listPullRequestFiles('acme', 'widgets', 42),
     ).rejects.toThrow('Não foi possível buscar os arquivos do PR: rate limit');
+  });
+
+  it('traduz 403 de rate limit ao listar arquivos do PR', async () => {
+    const gitHubService = buildService();
+    mockPaginate.mockRejectedValue(
+      Object.assign(new Error('rate limit exceeded'), {
+        status: 403,
+        response: {
+          data: {
+            message: 'API rate limit exceeded',
+          },
+        },
+      }),
+    );
+
+    await expect(
+      gitHubService.listPullRequestFiles('acme', 'widgets', 42),
+    ).rejects.toBeInstanceOf(HttpException);
+
+    await expect(
+      gitHubService.listPullRequestFiles('acme', 'widgets', 42),
+    ).rejects.toThrow(
+      'Não foi possível buscar os arquivos do PR: rate limit exceeded. O limite da API do GitHub foi atingido; aguarde e tente novamente.',
+    );
   });
 
   it('publica a review e mapeia o retorno do GitHub', async () => {
@@ -379,5 +433,80 @@ describe('GitHubService', () => {
         'REQUEST_CHANGES',
       ),
     ).rejects.toThrow('Não foi possível publicar a review: permission denied');
+  });
+
+  it('traduz 401 ao publicar review', async () => {
+    const gitHubService = buildService();
+    mockPullsCreateReview.mockRejectedValue(
+      Object.assign(new Error('Bad credentials'), {
+        status: 401,
+        response: {
+          data: {
+            message: 'Bad credentials',
+          },
+        },
+      }),
+    );
+
+    await expect(
+      gitHubService.publishReview(
+        'acme',
+        'widgets',
+        42,
+        'Review pronta',
+        'COMMENT',
+      ),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+
+    await expect(
+      gitHubService.publishReview(
+        'acme',
+        'widgets',
+        42,
+        'Review pronta',
+        'COMMENT',
+      ),
+    ).rejects.toThrow(
+      'Não foi possível publicar a review: Bad credentials. Verifique se o GITHUB_TOKEN está válido e não expirou.',
+    );
+  });
+
+  it('traduz 403 sem rate limit ao publicar review', async () => {
+    const gitHubService = buildService();
+    mockPullsCreateReview.mockRejectedValue(
+      Object.assign(
+        new Error('Resource not accessible by personal access token'),
+        {
+          status: 403,
+          response: {
+            data: {
+              message: 'Resource not accessible by personal access token',
+            },
+          },
+        },
+      ),
+    );
+
+    await expect(
+      gitHubService.publishReview(
+        'acme',
+        'widgets',
+        42,
+        'Review pronta',
+        'COMMENT',
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+
+    await expect(
+      gitHubService.publishReview(
+        'acme',
+        'widgets',
+        42,
+        'Review pronta',
+        'COMMENT',
+      ),
+    ).rejects.toThrow(
+      'Não foi possível publicar a review: Resource not accessible by personal access token. Verifique se o token tem permissão suficiente e se foi autorizado na organização, caso o repositório use SSO.',
+    );
   });
 });

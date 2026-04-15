@@ -154,7 +154,9 @@ export class PrReviewService {
     return {
       ...claudeReview,
       decision: 'REQUEST_CHANGES',
-      body: this.ensureMissingPullRequestDescriptionNote(claudeReview.body),
+      negatives: this.ensureMissingPullRequestDescriptionNegative(
+        claudeReview.negatives,
+      ),
       issues: this.ensureMissingPullRequestDescriptionIssue(
         claudeReview.issues,
       ),
@@ -185,7 +187,7 @@ export class PrReviewService {
     return {
       ...claudeReview,
       decision: 'REQUEST_CHANGES',
-      body: this.ensureMissingBackendTestNote(claudeReview.body),
+      testsNotes: this.ensureMissingBackendTestNote(claudeReview.testsNotes),
       issues: this.ensureMissingBackendTestIssue(
         claudeReview.issues,
         changeSetAnalysis.backendFiles[0],
@@ -220,27 +222,101 @@ export class PrReviewService {
   }
 
   private buildPublishedReviewBody(claudeReview: ClaudeReview): string {
-    const trimmedReviewBody = claudeReview.body.trim();
+    const sections = [
+      this.formatTextSection('Visão Geral', claudeReview.overview),
+      this.formatListSection(
+        'Melhorias',
+        claudeReview.improvements,
+        'Nenhuma melhoria adicional além dos riscos apontados.',
+      ),
+      this.formatTextSection('Testes', claudeReview.testsNotes),
+      this.formatListSection(
+        'Pontos Negativos',
+        claudeReview.negatives,
+        'Nenhum ponto negativo adicional identificado.',
+      ),
+      this.formatListSection(
+        'Pontos Positivos',
+        claudeReview.positives,
+        'Nenhum ponto positivo relevante identificado.',
+      ),
+    ];
 
-    if (claudeReview.issues.length === 0) {
-      return trimmedReviewBody;
+    if (claudeReview.issues.length > 0) {
+      sections.push(this.formatIssuesTable(claudeReview.issues));
     }
 
-    const formattedIssues = claudeReview.issues
-      .map((issue) => this.formatIssueSummary(issue))
-      .join('\n');
-
-    return `${trimmedReviewBody}\n\n**Pontos identificados:**\n${formattedIssues}`;
+    return sections.join('\n\n');
   }
 
-  private ensureMissingPullRequestDescriptionNote(reviewBody: string): string {
-    const trimmedReviewBody = reviewBody.trim();
+  private formatTextSection(title: string, content: string): string {
+    return `**${title}**\n${content.trim()}`;
+  }
 
-    if (this.mentionsMissingPullRequestDescription(trimmedReviewBody)) {
-      return trimmedReviewBody;
+  private formatListSection(
+    title: string,
+    items: string[],
+    emptyMessage: string,
+  ): string {
+    const normalizedItems = items.map((item) => item.trim()).filter(Boolean);
+
+    if (normalizedItems.length === 0) {
+      return `**${title}**\n_${emptyMessage}_`;
     }
 
-    return `${trimmedReviewBody}\n\nAlém disso, o PR está sem descrição. Adicione uma descrição resumindo o contexto, o que foi alterado e os principais impactos antes do merge.`;
+    const formattedItems = normalizedItems
+      .map((item) => `- ${item}`)
+      .join('\n');
+
+    return `**${title}**\n${formattedItems}`;
+  }
+
+  private formatIssuesTable(issues: ClaudeIssue[]): string {
+    const tableRows = issues
+      .map(
+        (issue) =>
+          `| ${this.formatIssueSeverityLabel(issue.severity)} | \`${this.escapeMarkdownTableCell(issue.file)}\` | ${this.escapeMarkdownTableCell(issue.reason)} |`,
+      )
+      .join('\n');
+
+    return [
+      '**Tabela de Riscos**',
+      '| Severidade | Arquivo | Motivo |',
+      '| --- | --- | --- |',
+      tableRows,
+    ].join('\n');
+  }
+
+  private formatIssueSeverityLabel(severity: ClaudeIssue['severity']): string {
+    switch (severity) {
+      case 'high':
+        return 'Alta';
+      case 'medium':
+        return 'Média';
+      case 'low':
+        return 'Baixa';
+    }
+  }
+
+  private escapeMarkdownTableCell(value: string): string {
+    return value.trim().replace(/\|/g, '\\|').replace(/\n+/g, ' ');
+  }
+
+  private ensureMissingPullRequestDescriptionNegative(
+    negatives: string[],
+  ): string[] {
+    if (
+      negatives.some((negative) =>
+        this.mentionsMissingPullRequestDescription(negative),
+      )
+    ) {
+      return negatives;
+    }
+
+    return [
+      ...negatives,
+      'O PR está sem descrição, o que dificulta validar contexto, escopo e impactos antes do merge.',
+    ];
   }
 
   private ensureMissingPullRequestDescriptionIssue(
@@ -281,14 +357,14 @@ export class PrReviewService {
     return updatedIssues;
   }
 
-  private ensureMissingBackendTestNote(reviewBody: string): string {
-    const trimmedReviewBody = reviewBody.trim();
+  private ensureMissingBackendTestNote(testsNotes: string): string {
+    const trimmedTestsNotes = testsNotes.trim();
 
-    if (this.mentionsMissingBackendTests(trimmedReviewBody)) {
-      return trimmedReviewBody;
+    if (this.mentionsMissingBackendTests(trimmedTestsNotes)) {
+      return trimmedTestsNotes;
     }
 
-    return `${trimmedReviewBody}\n\nAlém disso, o PR altera comportamento de back-end sem trazer testes automatizados para validar os cenários alterados. Isso precisa ser corrigido antes do merge.`;
+    return `${trimmedTestsNotes}\n\nAlém disso, o PR altera comportamento de back-end sem trazer testes automatizados para validar os cenários alterados. Isso precisa ser corrigido antes do merge.`;
   }
 
   private ensureMissingBackendTestIssue(
@@ -339,10 +415,6 @@ export class PrReviewService {
     severity: ClaudeIssue['severity'],
   ): boolean {
     return claudeReview.issues.some((issue) => issue.severity === severity);
-  }
-
-  private formatIssueSummary(issue: ClaudeIssue): string {
-    return `- [${issue.severity.toUpperCase()}] ${issue.file}: ${issue.reason}`;
   }
 
   private mentionsMissingPullRequestDescription(text: string): boolean {

@@ -76,13 +76,17 @@ describe('OllamaService', () => {
       text: jest
         .fn()
         .mockResolvedValue(
-          '{"message":{"content":"{\\"decision\\":\\"COMMENT\\",\\"body\\":\\"ok\\",\\"issues\\":[],\\"confidence\\":\\"medium\\"}"}}',
+          '{"message":{"content":"{\\"decision\\":\\"COMMENT\\",\\"overview\\":\\"ok\\",\\"improvements\\":[],\\"testsNotes\\":\\"os testes cobrem o fluxo principal\\",\\"negatives\\":[],\\"positives\\":[\\"mudança segura\\"],\\"issues\\":[],\\"confidence\\":\\"medium\\"}"}}',
         ),
     } as never);
 
     await expect(ollamaService.runReview('analise este PR')).resolves.toEqual({
       decision: 'COMMENT',
-      body: 'ok',
+      overview: 'ok',
+      improvements: [],
+      testsNotes: 'os testes cobrem o fluxo principal',
+      negatives: [],
+      positives: ['mudança segura'],
       issues: [],
       confidence: 'medium',
     });
@@ -178,7 +182,9 @@ describe('OllamaService', () => {
       status: 200,
       text: jest
         .fn()
-        .mockResolvedValue('{"message":{"content":"{\\"body\\":\\"ok\\"}"}}'),
+        .mockResolvedValue(
+          '{"message":{"content":"{\\"overview\\":\\"ok\\"}"}}',
+        ),
     } as never);
 
     await expect(ollamaService.runReview('prompt')).rejects.toThrow(
