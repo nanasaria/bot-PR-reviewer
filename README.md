@@ -30,7 +30,7 @@ Edite o `.env` e preencha o `GITHUB_TOKEN`.
 | `GITHUB_TOKEN`               | _(obrigatório)_               | Token pessoal do GitHub para ler PRs e criar reviews.                |
 | `GITHUB_API_BASE_URL`        | `https://api.github.com`      | Base URL da API (útil para GitHub Enterprise).                       |
 | `CLAUDE_COMMAND`             | `claude`                      | Comando do Claude Code CLI.                                          |
-| `CLAUDE_TIMEOUT_MS`          | `120000`                      | Timeout do Claude em milissegundos. Mínimo suportado: `1000`.        |
+| `CLAUDE_TIMEOUT_MS`          | `300000`                      | Timeout do Claude em milissegundos. Mínimo suportado: `1000`.        |
 | `OLLAMA_API_BASE_URL`        | `http://localhost:11434/api`  | Base URL da API local do Ollama.                                     |
 | `OLLAMA_COMMAND`             | `ollama`                      | Comando usado para executar `ollama serve` no auto-start.            |
 | `OLLAMA_MODEL`               | `qwen3-coder:30b`             | Modelo local usado no fallback.                                      |
@@ -63,14 +63,14 @@ OLLAMA_WARMUP_ON_BOOT=false
 
 ## API
 
-### `POST /pr-review`
+### `POST http://localhost:3081/pr-review`
 
 Recebe a URL de um PR, analisa e publica a review.
 
 #### Request
 
 ```http
-POST /pr-review
+POST http://localhost:3081/pr-review
 Content-Type: application/json
 
 {
@@ -182,3 +182,7 @@ src/
 - **`Não foi possível extrair JSON da resposta do Claude CLI`** → a saída não continha JSON parseável; rode manualmente `claude -p "..."` para diagnosticar.
 - **`Falha ao conectar ao Ollama ...`** → confirme que o `ollama` está instalado e acessível no `PATH`. Se não quiser auto-start, desabilite `OLLAMA_AUTO_START`.
 - **`Ollama retornou HTTP 404/503: model not found`** → rode `ollama pull qwen3-coder:30b` para baixar o modelo localmente antes do fallback.
+
+## Licença
+
+Este projeto é licenciado sob a [GNU General Public License v3.0](LICENSE).

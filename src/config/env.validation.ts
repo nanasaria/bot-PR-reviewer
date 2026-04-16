@@ -28,7 +28,7 @@ export class EnvironmentConfig {
   @IsOptional()
   @IsInt()
   @Min(1000)
-  CLAUDE_TIMEOUT_MS: number = 120000;
+  CLAUDE_TIMEOUT_MS: number = 300000;
 
   @IsOptional()
   @IsString()
