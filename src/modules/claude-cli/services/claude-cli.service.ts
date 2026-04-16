@@ -24,7 +24,7 @@ export class ClaudeCliService {
     const claudeCommand =
       this.configService.get<string>('CLAUDE_COMMAND') ?? 'claude';
     const claudeTimeoutMs =
-      this.configService.get<number>('CLAUDE_TIMEOUT_MS') ?? 120000;
+      this.configService.get<number>('CLAUDE_TIMEOUT_MS') ?? 300000;
 
     const rawResponse = await this.runClaudeCommand(
       claudeCommand,

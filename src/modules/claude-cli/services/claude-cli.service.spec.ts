@@ -61,7 +61,7 @@ describe('ClaudeCliService', () => {
         }
 
         if (key === 'CLAUDE_TIMEOUT_MS') {
-          return 120000;
+          return 300000;
         }
 
         return undefined;
@@ -102,7 +102,7 @@ describe('ClaudeCliService', () => {
     expect(runClaudeCommandSpy).toHaveBeenCalledWith(
       'claude-custom',
       ['-p', 'revise este PR'],
-      120000,
+      300000,
     );
   });
 

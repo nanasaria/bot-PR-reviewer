@@ -55,11 +55,13 @@ describe('buildPullRequestReviewPrompt', () => {
     );
     expect(prompt).toContain('prefira "caso de borda" em vez de "edge case"');
     expect(prompt).toContain('Estrutura obrigatória da resposta:');
-    expect(prompt).toContain('- overview: texto corrido');
+    expect(prompt).toContain('- overview: 1 a 2 parágrafos curtos');
     expect(prompt).toContain('- improvements: lista de sugestões concretas');
-    expect(prompt).toContain('- testsNotes: texto corrido avaliando os Testes');
-    expect(prompt).toContain('- negatives: lista de Pontos Negativos');
-    expect(prompt).toContain('- positives: lista de Pontos Positivos');
+    expect(prompt).toContain(
+      '- testsNotes: 1 a 2 frases sobre a cobertura de testes',
+    );
+    expect(prompt).toContain('- negatives: lista de pontos negativos');
+    expect(prompt).toContain('- positives: lista de pontos positivos');
     expect(prompt).toContain(
       'Contexto inferido automaticamente a partir do diff:',
     );
