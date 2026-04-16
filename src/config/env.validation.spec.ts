@@ -14,7 +14,7 @@ describe('validateEnv', () => {
       GITHUB_TOKEN: 'github-token',
       GITHUB_API_BASE_URL: 'https://api.github.com',
       CLAUDE_COMMAND: 'claude',
-      CLAUDE_TIMEOUT_MS: 120000,
+      CLAUDE_TIMEOUT_MS: 300000,
       OLLAMA_API_BASE_URL: 'http://localhost:11434/api',
       OLLAMA_COMMAND: 'ollama',
       OLLAMA_MODEL: 'qwen3-coder:30b',
