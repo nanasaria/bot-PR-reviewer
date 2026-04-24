@@ -18,9 +18,15 @@ type MockReadableStream = EventEmitter & {
   setEncoding: jest.Mock<void, [BufferEncoding]>;
 };
 
+type MockWritableStream = {
+  write: jest.Mock;
+  end: jest.Mock;
+};
+
 type MockClaudeProcess = EventEmitter & {
   stdout: MockReadableStream;
   stderr: MockReadableStream;
+  stdin: MockWritableStream;
   kill: jest.Mock<boolean, [NodeJS.Signals?]>;
   killed: boolean;
   exitCode: number | null;
@@ -33,10 +39,18 @@ function createMockReadableStream(): MockReadableStream {
   return stream;
 }
 
+function createMockWritableStream(): MockWritableStream {
+  return {
+    write: jest.fn(),
+    end: jest.fn(),
+  };
+}
+
 function createMockClaudeProcess(): MockClaudeProcess {
   const mockProcess = new EventEmitter() as MockClaudeProcess;
   mockProcess.stdout = createMockReadableStream();
   mockProcess.stderr = createMockReadableStream();
+  mockProcess.stdin = createMockWritableStream();
   mockProcess.killed = false;
   mockProcess.exitCode = null;
   mockProcess.signalCode = null;
@@ -53,11 +67,18 @@ function createMockClaudeProcess(): MockClaudeProcess {
 describe('ClaudeCliService', () => {
   const mockSpawn = jest.mocked(childProcess.spawn);
 
-  const buildService = (claudeCommand = 'claude-test'): ClaudeCliService => {
+  const buildService = (
+    claudeCommand = 'claude-test',
+    claudeModel = 'haiku',
+  ): ClaudeCliService => {
     const configServiceMock = {
       get: jest.fn((key: string) => {
         if (key === 'CLAUDE_COMMAND') {
           return claudeCommand;
+        }
+
+        if (key === 'CLAUDE_MODEL') {
+          return claudeModel;
         }
 
         if (key === 'CLAUDE_TIMEOUT_MS') {
@@ -101,8 +122,9 @@ describe('ClaudeCliService', () => {
     );
     expect(runClaudeCommandSpy).toHaveBeenCalledWith(
       'claude-custom',
-      ['-p', 'revise este PR'],
+      ['-p', '--model', 'haiku'],
       300000,
+      'revise este PR',
     );
   });
 
@@ -128,9 +150,10 @@ describe('ClaudeCliService', () => {
           claudeCommand: string,
           commandArguments: string[],
           timeoutMs: number,
+          stdinInput: string,
         ) => Promise<string>;
       }
-    ).runClaudeCommand('claude', ['-p', 'prompt'], 120000);
+    ).runClaudeCommand('claude', ['-p'], 120000, 'prompt');
 
     mockProcess.stdout.emit('data', '{"resultado":');
     mockProcess.stdout.emit('data', '"ok"}');
@@ -138,8 +161,8 @@ describe('ClaudeCliService', () => {
     mockProcess.emit('close', 0);
 
     await expect(commandPromise).resolves.toBe('{"resultado":"ok"}');
-    expect(mockSpawn).toHaveBeenCalledWith('claude', ['-p', 'prompt'], {
-      stdio: ['ignore', 'pipe', 'pipe'],
+    expect(mockSpawn).toHaveBeenCalledWith('claude', ['-p'], {
+      stdio: ['pipe', 'pipe', 'pipe'],
     });
     expect(mockProcess.stdout.setEncoding).toHaveBeenCalledWith('utf8');
     expect(mockProcess.stderr.setEncoding).toHaveBeenCalledWith('utf8');
@@ -156,15 +179,41 @@ describe('ClaudeCliService', () => {
           claudeCommand: string,
           commandArguments: string[],
           timeoutMs: number,
+          stdinInput: string,
         ) => Promise<string>;
       }
-    ).runClaudeCommand('claude', ['-p', 'prompt'], 120000);
+    ).runClaudeCommand('claude', ['-p'], 120000, 'prompt');
 
     mockProcess.stderr.emit('data', 'limite excedido');
     mockProcess.emit('close', 1);
 
     await expect(commandPromise).rejects.toThrow(
-      'Claude CLI retornou código 1: limite excedido',
+      'Claude CLI retornou código 1: stderr: limite excedido',
+    );
+  });
+
+  it('inclui stdout e stderr na mensagem de erro quando ambos existem', async () => {
+    const claudeCliService = buildService();
+    const mockProcess = createMockClaudeProcess();
+    mockSpawn.mockReturnValue(mockProcess as never);
+
+    const commandPromise = (
+      claudeCliService as unknown as {
+        runClaudeCommand: (
+          claudeCommand: string,
+          commandArguments: string[],
+          timeoutMs: number,
+          stdinInput: string,
+        ) => Promise<string>;
+      }
+    ).runClaudeCommand('claude', ['-p'], 120000, 'prompt');
+
+    mockProcess.stderr.emit('data', 'warning');
+    mockProcess.stdout.emit('data', "you've hit limit");
+    mockProcess.emit('close', 1);
+
+    await expect(commandPromise).rejects.toThrow(
+      "Claude CLI retornou código 1: stderr: warning | stdout: you've hit limit",
     );
   });
 
@@ -179,9 +228,10 @@ describe('ClaudeCliService', () => {
           claudeCommand: string,
           commandArguments: string[],
           timeoutMs: number,
+          stdinInput: string,
         ) => Promise<string>;
       }
-    ).runClaudeCommand('claude', ['-p', 'prompt'], 120000);
+    ).runClaudeCommand('claude', ['-p'], 120000, 'prompt');
 
     mockProcess.emit('error', new Error('spawn ENOENT'));
 
@@ -224,9 +274,10 @@ describe('ClaudeCliService', () => {
           claudeCommand: string,
           commandArguments: string[],
           timeoutMs: number,
+          stdinInput: string,
         ) => Promise<string>;
       }
-    ).runClaudeCommand('claude', ['-p', 'prompt'], 100);
+    ).runClaudeCommand('claude', ['-p'], 100, 'prompt');
 
     expect(mockProcess.listenerCount('error')).toBe(1);
     expect(mockProcess.listenerCount('close')).toBe(1);

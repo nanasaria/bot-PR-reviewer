@@ -6,7 +6,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { spawn, type ChildProcessByStdio } from 'node:child_process';
 import { performance } from 'node:perf_hooks';
-import type { Readable } from 'node:stream';
+import type { Readable, Writable } from 'node:stream';
 import { getErrorMessage } from '../../../common/utils/error-message.util';
 import { extractJsonPayload } from '../../../common/utils/json-payload.util';
 import {
@@ -23,13 +23,16 @@ export class ClaudeCliService {
   async runReview(prompt: string): Promise<ClaudeReview> {
     const claudeCommand =
       this.configService.get<string>('CLAUDE_COMMAND') ?? 'claude';
+    const claudeModel =
+      this.configService.get<string>('CLAUDE_MODEL') ?? 'haiku';
     const claudeTimeoutMs =
       this.configService.get<number>('CLAUDE_TIMEOUT_MS') ?? 300000;
 
     const rawResponse = await this.runClaudeCommand(
       claudeCommand,
-      ['-p', prompt],
+      ['-p', '--model', claudeModel],
       claudeTimeoutMs,
+      prompt,
     );
 
     const parsedJsonPayload = extractJsonPayload(
@@ -56,12 +59,13 @@ export class ClaudeCliService {
     claudeCommand: string,
     commandArguments: string[],
     timeoutMs: number,
+    stdinInput: string,
   ): Promise<string> {
     return new Promise((resolve, reject) => {
       const startedAt = performance.now();
       let stdoutOutput = '';
       let stderrOutput = '';
-      let claudeProcess: ChildProcessByStdio<null, Readable, Readable>;
+      let claudeProcess: ChildProcessByStdio<Writable, Readable, Readable>;
       let forceKillHandle: NodeJS.Timeout | undefined;
       let isSettled = false;
 
@@ -69,8 +73,9 @@ export class ClaudeCliService {
 
       try {
         claudeProcess = spawn(claudeCommand, commandArguments, {
-          stdio: ['ignore', 'pipe', 'pipe'],
+          stdio: ['pipe', 'pipe', 'pipe'],
         });
+        claudeProcess.stdin.end(stdinInput, 'utf8');
       } catch (error) {
         reject(
           new InternalServerErrorException(
@@ -160,13 +165,17 @@ export class ClaudeCliService {
         }
 
         if (exitCode !== 0) {
+          const outputSummary = this.formatProcessOutputSummary(
+            stdoutOutput,
+            stderrOutput,
+          );
           this.logger.error(
-            `Claude CLI saiu com código ${exitCode} após ~${getElapsedMs()}ms. stderr: ${stderrOutput}`,
+            `Claude CLI saiu com código ${exitCode} após ~${getElapsedMs()}ms. ${outputSummary}`,
           );
           finish(() => {
             reject(
               new InternalServerErrorException(
-                `Claude CLI retornou código ${exitCode}: ${stderrOutput || stdoutOutput || '(sem saída)'}`,
+                `Claude CLI retornou código ${exitCode}: ${outputSummary}`,
               ),
             );
           });
@@ -179,5 +188,24 @@ export class ClaudeCliService {
         });
       });
     });
+  }
+
+  private formatProcessOutputSummary(
+    stdoutOutput: string,
+    stderrOutput: string,
+  ): string {
+    const normalizedStdout = stdoutOutput.trim();
+    const normalizedStderr = stderrOutput.trim();
+    const outputSections: string[] = [];
+
+    if (normalizedStderr) {
+      outputSections.push(`stderr: ${normalizedStderr}`);
+    }
+
+    if (normalizedStdout) {
+      outputSections.push(`stdout: ${normalizedStdout}`);
+    }
+
+    return outputSections.join(' | ') || '(sem saída)';
   }
 }

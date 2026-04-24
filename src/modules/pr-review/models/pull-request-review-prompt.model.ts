@@ -1,4 +1,5 @@
 import type {
+  GitHubPullRequestComment,
   GitHubPullRequestFile,
   GitHubPullRequestSummary,
 } from '../../github/models/github-pull-request.model';
@@ -9,4 +10,5 @@ export interface PullRequestReviewPromptModel {
   pullRequestNumber: number;
   pullRequestSummary: GitHubPullRequestSummary;
   changedFiles: GitHubPullRequestFile[];
+  comments: GitHubPullRequestComment[];
 }

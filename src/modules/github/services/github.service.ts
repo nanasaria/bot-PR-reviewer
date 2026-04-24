@@ -13,6 +13,7 @@ import { Octokit } from '@octokit/rest';
 import { getErrorMessage } from '../../../common/utils/error-message.util';
 import type {
   GitHubPublishedReview,
+  GitHubPullRequestComment,
   GitHubPullRequestFile,
   GitHubPullRequestSummary,
 } from '../models/github-pull-request.model';
@@ -118,6 +119,36 @@ export class GitHubService {
       this.throwGitHubOperationError(
         `Falha ao buscar arquivos do PR ${repositoryOwner}/${repositoryName}#${pullRequestNumber}`,
         'Não foi possível buscar os arquivos do PR',
+        error,
+      );
+    }
+  }
+
+  async listPullRequestComments(
+    repositoryOwner: string,
+    repositoryName: string,
+    pullRequestNumber: number,
+  ): Promise<GitHubPullRequestComment[]> {
+    try {
+      const issueComments = await this.octokit.paginate(
+        this.octokit.issues.listComments,
+        {
+          owner: repositoryOwner,
+          repo: repositoryName,
+          issue_number: pullRequestNumber,
+          per_page: 100,
+        },
+      );
+
+      return issueComments.map((comment) => ({
+        author: comment.user?.login ?? 'desconhecido',
+        body: comment.body ?? '',
+        createdAt: comment.created_at,
+      }));
+    } catch (error) {
+      this.throwGitHubOperationError(
+        `Falha ao buscar comentários do PR ${repositoryOwner}/${repositoryName}#${pullRequestNumber}`,
+        'Não foi possível buscar os comentários do PR',
         error,
       );
     }
