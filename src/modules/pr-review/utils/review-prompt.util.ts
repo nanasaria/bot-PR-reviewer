@@ -1,4 +1,7 @@
-import type { GitHubPullRequestFile } from '../../github/models/github-pull-request.model';
+import type {
+  GitHubPullRequestComment,
+  GitHubPullRequestFile,
+} from '../../github/models/github-pull-request.model';
 import type { PullRequestReviewPromptModel } from '../models/pull-request-review-prompt.model';
 import { analyzePullRequestChangeSet } from './change-set-analysis.util';
 
@@ -11,6 +14,7 @@ export function buildPullRequestReviewPrompt(
     pullRequestNumber,
     pullRequestSummary,
     changedFiles,
+    comments,
   } = reviewContext;
 
   const changedFilesSection = changedFiles
@@ -20,6 +24,7 @@ export function buildPullRequestReviewPrompt(
     changedFiles,
     repositoryName,
   );
+  const commentsSection = formatCommentsSection(comments);
 
   return [
     'Você é uma engenheira sênior fazendo uma revisão técnica, crítica e aprofundada de um Pull Request do GitHub.',
@@ -37,6 +42,7 @@ export function buildPullRequestReviewPrompt(
       ? pullRequestSummary.body
       : '(sem descrição)',
     '',
+    commentsSection,
     'Contexto inferido automaticamente a partir do diff:',
     `- há alterações de back-end: ${changeSetAnalysis.hasBackendChanges ? 'sim' : 'não'}`,
     `- há alterações de front-end: ${changeSetAnalysis.hasFrontendChanges ? 'sim' : 'não'}`,
@@ -46,6 +52,7 @@ export function buildPullRequestReviewPrompt(
     changedFilesSection || '(nenhum arquivo)',
     '',
     'Faça uma revisão profunda do diff e das interações entre os arquivos alterados.',
+    'Considere os comentários do PR como contexto adicional: eles podem conter discussões relevantes, decisões de design ou pedidos de correção que devem influenciar sua análise.',
     'Não se limite ao texto da descrição do PR; valide se a implementação realmente sustenta o comportamento esperado.',
     '',
     'Revise focando principalmente em:',
@@ -120,6 +127,7 @@ export function buildSimplifiedPullRequestReviewPrompt(
     pullRequestNumber,
     pullRequestSummary,
     changedFiles,
+    comments,
   } = reviewContext;
 
   const changedFilesSection = changedFiles
@@ -129,6 +137,7 @@ export function buildSimplifiedPullRequestReviewPrompt(
     changedFiles,
     repositoryName,
   );
+  const commentsSection = formatCommentsSection(comments);
 
   return [
     'Você é uma revisora técnica de Pull Requests do GitHub. Responda em português do Brasil.',
@@ -143,6 +152,7 @@ export function buildSimplifiedPullRequestReviewPrompt(
       ? pullRequestSummary.body
       : '(sem descrição)',
     '',
+    commentsSection,
     'Contexto do diff:',
     `- back-end: ${changeSetAnalysis.hasBackendChanges ? 'sim' : 'não'}`,
     `- front-end: ${changeSetAnalysis.hasFrontendChanges ? 'sim' : 'não'}`,
@@ -178,4 +188,21 @@ function formatChangedFileSection(changedFile: GitHubPullRequestFile): string {
     : '\n_(sem diff disponível)_';
 
   return `${fileHeader}${filePatch}`;
+}
+
+function formatCommentsSection(
+  comments: GitHubPullRequestComment[],
+): string {
+  if (comments.length === 0) {
+    return 'Comentários do PR:\n(nenhum comentário)\n';
+  }
+
+  const formattedComments = comments
+    .map(
+      (comment) =>
+        `- **${comment.author}** (${comment.createdAt}):\n  ${comment.body}`,
+    )
+    .join('\n');
+
+  return `Comentários do PR:\n${formattedComments}\n`;
 }

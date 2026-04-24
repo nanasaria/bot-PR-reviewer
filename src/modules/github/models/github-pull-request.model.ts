@@ -22,6 +22,12 @@ export interface GitHubPullRequestSummary {
   deletions: number;
 }
 
+export interface GitHubPullRequestComment {
+  author: string;
+  body: string;
+  createdAt: string;
+}
+
 export interface GitHubPublishedReview {
   id: number;
   htmlUrl: string;
