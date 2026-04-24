@@ -190,9 +190,7 @@ function formatChangedFileSection(changedFile: GitHubPullRequestFile): string {
   return `${fileHeader}${filePatch}`;
 }
 
-function formatCommentsSection(
-  comments: GitHubPullRequestComment[],
-): string {
+function formatCommentsSection(comments: GitHubPullRequestComment[]): string {
   if (comments.length === 0) {
     return 'Comentários do PR:\n(nenhum comentário)\n';
   }

@@ -271,9 +271,7 @@ describe('GitHubService', () => {
 
     await expect(
       gitHubService.listPullRequestComments('acme', 'widgets', 42),
-    ).rejects.toThrow(
-      'Não foi possível buscar os comentários do PR: timeout',
-    );
+    ).rejects.toThrow('Não foi possível buscar os comentários do PR: timeout');
   });
 
   it('publica a review e mapeia o retorno do GitHub', async () => {
