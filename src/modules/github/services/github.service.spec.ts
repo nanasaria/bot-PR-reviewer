@@ -7,6 +7,7 @@ import {
 const mockPullsGet = jest.fn();
 const mockPullsListFiles = jest.fn();
 const mockPullsCreateReview = jest.fn();
+const mockIssuesListComments = jest.fn();
 const mockPaginate = jest.fn();
 const mockUsersGetAuthenticated = jest.fn();
 const mockOctokit = jest.fn().mockImplementation(() => ({
@@ -14,6 +15,9 @@ const mockOctokit = jest.fn().mockImplementation(() => ({
     get: mockPullsGet,
     listFiles: mockPullsListFiles,
     createReview: mockPullsCreateReview,
+  },
+  issues: {
+    listComments: mockIssuesListComments,
   },
   users: {
     getAuthenticated: mockUsersGetAuthenticated,
@@ -218,6 +222,56 @@ describe('GitHubService', () => {
     ).rejects.toThrow(
       'Não foi possível buscar os arquivos do PR: rate limit exceeded. O limite da API do GitHub foi atingido; aguarde e tente novamente.',
     );
+  });
+
+  it('lista e mapeia os comentários do pull request', async () => {
+    const gitHubService = buildService();
+    mockPaginate.mockResolvedValue([
+      {
+        user: { login: 'dev-ana' },
+        body: 'Esse trecho precisa de teste unitário.',
+        created_at: '2026-04-15T10:00:00Z',
+      },
+      {
+        user: null,
+        body: 'Comentário de bot.',
+        created_at: '2026-04-15T11:00:00Z',
+      },
+    ]);
+
+    const comments = await gitHubService.listPullRequestComments(
+      'acme',
+      'widgets',
+      42,
+    );
+
+    expect(mockPaginate).toHaveBeenCalledWith(mockIssuesListComments, {
+      owner: 'acme',
+      repo: 'widgets',
+      issue_number: 42,
+      per_page: 100,
+    });
+    expect(comments).toEqual([
+      {
+        author: 'dev-ana',
+        body: 'Esse trecho precisa de teste unitário.',
+        createdAt: '2026-04-15T10:00:00Z',
+      },
+      {
+        author: 'desconhecido',
+        body: 'Comentário de bot.',
+        createdAt: '2026-04-15T11:00:00Z',
+      },
+    ]);
+  });
+
+  it('lança erro amigável ao falhar ao buscar comentários do PR', async () => {
+    const gitHubService = buildService();
+    mockPaginate.mockRejectedValue(new Error('timeout'));
+
+    await expect(
+      gitHubService.listPullRequestComments('acme', 'widgets', 42),
+    ).rejects.toThrow('Não foi possível buscar os comentários do PR: timeout');
   });
 
   it('publica a review e mapeia o retorno do GitHub', async () => {

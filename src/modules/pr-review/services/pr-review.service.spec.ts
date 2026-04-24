@@ -73,7 +73,7 @@ describe('PrReviewService.determineReviewEvent', () => {
     ).toBe('COMMENT');
   });
 
-  it('APPROVE com confidence low e apenas issue low => COMMENT', () => {
+  it('APPROVE com confidence low e apenas issue low => APPROVE', () => {
     expect(
       prReviewService.determineReviewEvent(
         buildClaudeReview({
@@ -82,7 +82,7 @@ describe('PrReviewService.determineReviewEvent', () => {
           issues: [{ severity: 'low', file: 'a.ts', reason: 'nit' }],
         }),
       ),
-    ).toBe('COMMENT');
+    ).toBe('APPROVE');
   });
 
   it('REQUEST_CHANGES com issue high => REQUEST_CHANGES', () => {
@@ -96,7 +96,7 @@ describe('PrReviewService.determineReviewEvent', () => {
     ).toBe('REQUEST_CHANGES');
   });
 
-  it('REQUEST_CHANGES sem issues obrigatórias vira COMMENT', () => {
+  it('REQUEST_CHANGES com apenas issues low vira APPROVE', () => {
     expect(
       prReviewService.determineReviewEvent(
         buildClaudeReview({
@@ -104,7 +104,19 @@ describe('PrReviewService.determineReviewEvent', () => {
           issues: [{ severity: 'low', file: 'a.ts', reason: 'nit' }],
         }),
       ),
-    ).toBe('COMMENT');
+    ).toBe('APPROVE');
+  });
+
+  it('APPROVE com apenas issues low vira APPROVE', () => {
+    expect(
+      prReviewService.determineReviewEvent(
+        buildClaudeReview({
+          decision: 'APPROVE',
+          confidence: 'high',
+          issues: [{ severity: 'low', file: 'a.ts', reason: 'nit' }],
+        }),
+      ),
+    ).toBe('APPROVE');
   });
 
   it('COMMENT com issue medium vira REQUEST_CHANGES', () => {
@@ -168,11 +180,15 @@ describe('PrReviewService.reviewPullRequest', () => {
     const gitHubServiceMock: jest.Mocked<
       Pick<
         GitHubService,
-        'getPullRequestSummary' | 'listPullRequestFiles' | 'publishReview'
+        | 'getPullRequestSummary'
+        | 'listPullRequestFiles'
+        | 'listPullRequestComments'
+        | 'publishReview'
       >
     > = {
       getPullRequestSummary: jest.fn().mockResolvedValue(reviewSummary),
       listPullRequestFiles: jest.fn().mockResolvedValue(reviewFiles),
+      listPullRequestComments: jest.fn().mockResolvedValue([]),
       publishReview: jest.fn().mockResolvedValue(reviewPublication),
     };
     const claudeCliServiceMock: jest.Mocked<
@@ -180,7 +196,10 @@ describe('PrReviewService.reviewPullRequest', () => {
     > = {
       runReview: jest.fn(),
     };
-    const ollamaServiceMock: jest.Mocked<Pick<OllamaService, 'runReview'>> = {
+    const ollamaServiceMock: jest.Mocked<
+      Pick<OllamaService, 'prepareForRequests' | 'runReview'>
+    > = {
+      prepareForRequests: jest.fn().mockResolvedValue(undefined),
       runReview: jest.fn(),
     };
 
@@ -220,6 +239,7 @@ describe('PrReviewService.reviewPullRequest', () => {
     const result = await prReviewService.reviewPullRequest(pullRequestUrl);
 
     expect(claudeCliServiceMock.runReview).toHaveBeenCalledTimes(1);
+    expect(ollamaServiceMock.prepareForRequests).toHaveBeenCalledTimes(1);
     expect(ollamaServiceMock.runReview).toHaveBeenCalledTimes(1);
     const publishedBody = gitHubServiceMock.publishReview.mock.calls[0]?.[3];
 
@@ -234,6 +254,42 @@ describe('PrReviewService.reviewPullRequest', () => {
     expectStructuredReviewSections(publishedBody);
     expect(publishedBody).toContain('Fallback local executado');
     expect(result.review).toEqual(publishedReview);
+    expect(result.event).toBe('COMMENT');
+  });
+
+  it('usa fallback do Ollama quando a mensagem de limite vem combinada com stdout e stderr', async () => {
+    const {
+      prReviewService,
+      gitHubServiceMock,
+      claudeCliServiceMock,
+      ollamaServiceMock,
+    } = buildService();
+    const ollamaReview: ClaudeReview = buildClaudeReview({
+      decision: 'COMMENT',
+      overview: 'Fallback acionado a partir da saída combinada do Claude',
+      confidence: 'medium',
+    });
+
+    claudeCliServiceMock.runReview.mockRejectedValue(
+      new InternalServerErrorException(
+        "Claude CLI retornou código 1: stderr: warning | stdout: you've hit limit",
+      ),
+    );
+    ollamaServiceMock.runReview.mockResolvedValue(ollamaReview);
+
+    const result = await prReviewService.reviewPullRequest(pullRequestUrl);
+
+    expect(claudeCliServiceMock.runReview).toHaveBeenCalledTimes(1);
+    expect(ollamaServiceMock.prepareForRequests).toHaveBeenCalledTimes(1);
+    expect(ollamaServiceMock.runReview).toHaveBeenCalledTimes(1);
+    expect(gitHubServiceMock.publishReview).toHaveBeenCalledWith(
+      'acme',
+      'widgets',
+      42,
+      expect.any(String),
+      'COMMENT',
+      'notro',
+    );
     expect(result.event).toBe('COMMENT');
   });
 
@@ -467,8 +523,29 @@ describe('PrReviewService.reviewPullRequest', () => {
     ).rejects.toThrow(
       "Claude CLI atingiu o limite de uso e o fallback Ollama falhou. Claude: you've hit limit. Ollama: Ollama offline",
     );
+    expect(ollamaServiceMock.prepareForRequests).toHaveBeenCalledTimes(1);
     expect(ollamaServiceMock.runReview).toHaveBeenCalledTimes(1);
     expect(gitHubServiceMock.publishReview).not.toHaveBeenCalled();
+  });
+
+  it('prepara o Ollama antes de tentar a review de fallback', async () => {
+    const { prReviewService, claudeCliServiceMock, ollamaServiceMock } =
+      buildService();
+
+    claudeCliServiceMock.runReview.mockRejectedValue(
+      new InternalServerErrorException("you've hit limit"),
+    );
+    ollamaServiceMock.prepareForRequests.mockRejectedValue(
+      new InternalServerErrorException('Warm-up falhou'),
+    );
+
+    await expect(
+      prReviewService.reviewPullRequest(pullRequestUrl),
+    ).rejects.toThrow(
+      "Claude CLI atingiu o limite de uso e o fallback Ollama falhou. Claude: you've hit limit. Ollama: Warm-up falhou",
+    );
+    expect(ollamaServiceMock.prepareForRequests).toHaveBeenCalledTimes(1);
+    expect(ollamaServiceMock.runReview).not.toHaveBeenCalled();
   });
 
   it('retorna o evento realmente publicado pelo GitHub', async () => {

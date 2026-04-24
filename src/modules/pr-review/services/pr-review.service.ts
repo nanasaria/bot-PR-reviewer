@@ -40,13 +40,18 @@ export class PrReviewService {
       `Analisando PR ${owner}/${repositoryName}#${pullRequestNumber}`,
     );
 
-    const [pullRequestSummary, changedFiles] = await Promise.all([
+    const [pullRequestSummary, changedFiles, comments] = await Promise.all([
       this.gitHubService.getPullRequestSummary(
         owner,
         repositoryName,
         pullRequestNumber,
       ),
       this.gitHubService.listPullRequestFiles(
+        owner,
+        repositoryName,
+        pullRequestNumber,
+      ),
+      this.gitHubService.listPullRequestComments(
         owner,
         repositoryName,
         pullRequestNumber,
@@ -65,6 +70,7 @@ export class PrReviewService {
       pullRequestNumber,
       pullRequestSummary,
       changedFiles,
+      comments,
     });
     const claudeReview = await this.runReviewWithFallback(reviewPrompt);
     const reviewWithRequiredDescription =
@@ -106,9 +112,15 @@ export class PrReviewService {
       'high',
     );
     const hasBlockingIssue = this.hasBlockingIssue(claudeReview);
+    const hasOnlyLowSeverityIssues =
+      claudeReview.issues.length > 0 && !hasBlockingIssue;
 
     if (hasHighSeverityIssue) {
       return 'REQUEST_CHANGES';
+    }
+
+    if (hasOnlyLowSeverityIssues) {
+      return 'APPROVE';
     }
 
     switch (claudeReview.decision) {
@@ -210,6 +222,7 @@ export class PrReviewService {
       );
 
       try {
+        await this.ollamaService.prepareForRequests();
         return await this.ollamaService.runReview(reviewPrompt);
       } catch (ollamaError) {
         throw new InternalServerErrorException(

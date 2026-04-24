@@ -28,6 +28,7 @@ describe('buildPullRequestReviewPrompt', () => {
           patch: '@@ -1,2 +1,3 @@\n-console.log("old")\n+console.log("new")',
         },
       ],
+      comments: [],
     });
 
     expect(prompt).toContain(
