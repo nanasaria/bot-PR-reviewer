@@ -14,20 +14,18 @@ export interface ReReviewPromptModel {
   reviewerComments: ReviewerCommentModel[];
 }
 
+const MAX_DIFF_HUNK_LINES = 10;
+
 export function buildReReviewPrompt(
   reviewContext: ReReviewPromptModel,
 ): string {
-  const {
-    repositoryOwner,
-    repositoryName,
-    pullRequestNumber,
-    pullRequestSummary,
-    changedFiles,
-    reviewerLogin,
-    reviewerComments,
-  } = reviewContext;
+  const { pullRequestSummary, changedFiles, reviewerComments } = reviewContext;
 
-  const changedFilesSection = changedFiles
+  const relevantFiles = selectRelevantFilesForReReview(
+    changedFiles,
+    reviewerComments,
+  );
+  const changedFilesSection = relevantFiles
     .map((changedFile) => formatChangedFileSection(changedFile))
     .join('\n\n');
   const reviewerCommentsSection = reviewerComments
@@ -35,68 +33,70 @@ export function buildReReviewPrompt(
     .join('\n\n');
 
   return [
-    'Você é uma engenheira sênior conduzindo um RE-REVIEW de um Pull Request do GitHub.',
-    'Este é um re-review estritamente limitado: você deve analisar APENAS os comentários anteriores do reviewer configurado, listados abaixo.',
-    'Não procure problemas novos fora do escopo desses comentários. Não repita literalmente o que já foi dito antes.',
+    'Re-review estritamente limitado: avalie APENAS os comentários abaixo, na mesma ordem. Não inclua problemas novos fora desse escopo. Não repita literalmente o comentário.',
     '',
-    `Repositório: ${repositoryOwner}/${repositoryName}`,
-    `PR #${pullRequestNumber}: ${pullRequestSummary.title}`,
-    `Autor do PR: ${pullRequestSummary.author}`,
-    `Reviewer configurado: ${reviewerLogin}`,
-    `Branch: ${pullRequestSummary.headRef} -> ${pullRequestSummary.baseRef}`,
-    `Estado: ${pullRequestSummary.state}${pullRequestSummary.draft ? ' (draft)' : ''}`,
-    `Arquivos alterados: ${pullRequestSummary.changedFiles} | +${pullRequestSummary.additions}/-${pullRequestSummary.deletions}`,
+    `PR: ${pullRequestSummary.title}`,
     '',
-    'Descrição do PR:',
-    pullRequestSummary.body?.trim()
-      ? pullRequestSummary.body
-      : '(sem descrição)',
+    'Comentários anteriores:',
+    reviewerCommentsSection || '(nenhum)',
     '',
-    'Comentários anteriores do reviewer (somente estes itens devem ser avaliados):',
-    reviewerCommentsSection || '(nenhum comentário anterior)',
+    'Diff atual (apenas arquivos relevantes):',
+    changedFilesSection || '(nenhum arquivo relevante)',
     '',
-    'Arquivos e diffs atuais do PR:',
-    changedFilesSection || '(nenhum arquivo)',
+    'Status:',
+    '- corrigido: resolvido.',
+    '- parcialmente_corrigido: resolvido em parte.',
+    '- nao_corrigido: ainda presente.',
+    '- nao_aplicavel: trecho removido/refatorado, ponto não cabe mais.',
+    '- impossivel_validar: não dá para afirmar pelo diff.',
     '',
-    'Para cada comentário anterior, avalie se ele foi endereçado no diff atual e classifique o status:',
-    '- "corrigido": o ponto foi resolvido completamente.',
-    '- "parcialmente_corrigido": o ponto foi parcialmente endereçado, mas ainda há ajustes pendentes.',
-    '- "nao_corrigido": o ponto continua presente no código atual.',
-    '- "nao_aplicavel": o trecho relevante foi removido/refatorado a ponto de o ponto não fazer mais sentido.',
-    '- "impossivel_validar": não é possível afirmar com segurança o estado do ponto a partir do diff.',
+    'Regras:',
+    '- 1 item por comentário, mesma ordem.',
+    '- "file" = caminho atual; se renomeado, use o novo. Se sumiu sem mapeamento, use "(arquivo não localizado)" + status nao_aplicavel ou impossivel_validar.',
+    '- "originalComment": trecho curto (≤200 chars) que identifique o ponto.',
+    '- "analysis": estado atual em 1-2 frases.',
+    '- "recommendedAction": próximo passo objetivo, ou "Nenhuma" para corrigido/nao_aplicavel.',
+    '- PT-BR; em inglês apenas nomes técnicos.',
     '',
-    'Regras estritas:',
-    '- Avalie um item por comentário anterior, na mesma ordem em que aparecem acima.',
-    '- Em "originalComment", coloque um trecho curto (até 200 caracteres) que identifique o comentário anterior.',
-    '- Em "file", use o caminho do arquivo associado ao comentário. Se o arquivo foi renomeado, use o novo caminho do diff.',
-    '- Se o arquivo associado ao comentário não estiver mais presente no diff e não for possível mapear para um novo caminho, use "(arquivo não localizado)" e marque o status como "nao_aplicavel" ou "impossivel_validar".',
-    '- Se o comentário anterior for genérico (sem arquivo/linha), avalie apenas o tema correspondente sem expandir o escopo.',
-    '- Não inclua problemas novos fora do escopo dos comentários anteriores.',
-    '- Não repita literalmente o comentário anterior; em "analysis" descreva o estado atual e em "recommendedAction" diga o próximo passo (ou "Nenhuma" quando "corrigido"/"nao_aplicavel").',
-    '',
-    'Regras de linguagem:',
-    '- escreva em português do Brasil natural, claro e profissional.',
-    '- mantenha em inglês apenas nomes técnicos: arquivos, identificadores, comandos, APIs.',
-    '',
-    'IMPORTANTE: seja objetiva e concisa. Evite textos longos.',
-    '',
-    'Estrutura obrigatória da resposta (JSON puro, sem markdown, sem cercas, sem prosa fora do JSON):',
+    'Responda APENAS com JSON puro, sem markdown nem prosa fora do JSON:',
     '{',
-    '  "overview": "1 a 2 frases curtas resumindo o re-review",',
+    '  "overview": "1-2 frases",',
     '  "items": [',
-    '    {',
-    '      "originalComment": "trecho curto do comentário original",',
-    '      "file": "caminho/arquivo ou (arquivo não localizado)",',
-    '      "status": "corrigido" | "parcialmente_corrigido" | "nao_corrigido" | "nao_aplicavel" | "impossivel_validar",',
-    '      "analysis": "estado atual do ponto, em 1-2 frases curtas",',
-    '      "recommendedAction": "próximo passo objetivo ou Nenhuma"',
-    '    }',
+    '    { "originalComment": "...", "file": "...", "status": "corrigido|parcialmente_corrigido|nao_corrigido|nao_aplicavel|impossivel_validar", "analysis": "...", "recommendedAction": "..." }',
     '  ],',
-    '  "confidence": "high" | "medium" | "low"',
+    '  "confidence": "high|medium|low"',
     '}',
-    '',
-    'Antes de responder, faça uma checagem silenciosa para confirmar que o JSON está válido, que cada comentário anterior gerou exatamente 1 item, e que o texto está em português do Brasil exceto identificadores técnicos.',
   ].join('\n');
+}
+
+export function selectRelevantFilesForReReview(
+  changedFiles: GitHubPullRequestFile[],
+  reviewerComments: ReviewerCommentModel[],
+): GitHubPullRequestFile[] {
+  if (reviewerComments.length === 0) {
+    return changedFiles;
+  }
+
+  const everyCommentHasFile = reviewerComments.every(
+    (comment) => comment.filePath !== null && comment.filePath.length > 0,
+  );
+  if (!everyCommentHasFile) {
+    return changedFiles;
+  }
+
+  const referencedPaths = new Set<string>();
+  for (const comment of reviewerComments) {
+    if (comment.filePath) {
+      referencedPaths.add(comment.filePath);
+    }
+  }
+
+  return changedFiles.filter(
+    (changedFile) =>
+      referencedPaths.has(changedFile.filename) ||
+      (changedFile.previousFilename !== undefined &&
+        referencedPaths.has(changedFile.previousFilename)),
+  );
 }
 
 function formatChangedFileSection(changedFile: GitHubPullRequestFile): string {
@@ -106,7 +106,7 @@ function formatChangedFileSection(changedFile: GitHubPullRequestFile): string {
   const fileHeader = `### ${changedFile.filename} (${changedFile.status}, +${changedFile.additions}/-${changedFile.deletions})${renameInfo}`;
   const filePatch = changedFile.patch
     ? `\n\`\`\`diff\n${changedFile.patch}\n\`\`\``
-    : '\n_(sem diff disponível)_';
+    : '\n_(sem diff)_';
 
   return `${fileHeader}${filePatch}`;
 }
@@ -115,30 +115,42 @@ function formatReviewerCommentSection(
   reviewerComment: ReviewerCommentModel,
   itemNumber: number,
 ): string {
-  const filePathInfo = reviewerComment.filePath ?? '(sem arquivo associado)';
-  const lineInfo =
-    reviewerComment.line === null
-      ? '(sem linha associada)'
-      : String(reviewerComment.line);
-  const outdatedInfo = reviewerComment.outdated
-    ? ' [trecho original não existe mais no diff atual]'
-    : '';
-  const codeSnippetInfo = reviewerComment.codeSnippet
-    ? `\n  Trecho original (diff hunk):\n  \`\`\`\n${reviewerComment.codeSnippet
-        .split('\n')
-        .map((line) => `  ${line}`)
-        .join('\n')}\n  \`\`\``
+  const location = formatReviewerCommentLocation(reviewerComment);
+  const outdatedInfo = reviewerComment.outdated ? ' [outdated]' : '';
+  const compactedHunk = compactDiffHunk(reviewerComment.codeSnippet);
+  const codeSnippetInfo = compactedHunk
+    ? `\nhunk:\n\`\`\`\n${compactedHunk}\n\`\`\``
     : '';
 
-  return [
-    `### Comentário ${itemNumber} (${reviewerComment.source})${outdatedInfo}`,
-    `- Arquivo: ${filePathInfo}`,
-    `- Linha: ${lineInfo}`,
-    `- Autor: ${reviewerComment.author}`,
-    `- Data: ${reviewerComment.createdAt || '(desconhecida)'}`,
-    `- Conteúdo:\n  ${reviewerComment.body.split('\n').join('\n  ')}`,
-    codeSnippetInfo,
-  ]
-    .filter((line) => line !== '')
-    .join('\n');
+  return `${itemNumber}. ${location}${outdatedInfo}\n> ${reviewerComment.body
+    .split('\n')
+    .join('\n> ')}${codeSnippetInfo}`;
+}
+
+function formatReviewerCommentLocation(
+  reviewerComment: ReviewerCommentModel,
+): string {
+  if (!reviewerComment.filePath) {
+    return '(comentário geral)';
+  }
+
+  if (reviewerComment.line === null) {
+    return reviewerComment.filePath;
+  }
+
+  return `${reviewerComment.filePath}:${reviewerComment.line}`;
+}
+
+function compactDiffHunk(diffHunk: string | null): string | null {
+  if (!diffHunk) {
+    return null;
+  }
+
+  const lines = diffHunk.split('\n');
+  if (lines.length <= MAX_DIFF_HUNK_LINES) {
+    return diffHunk;
+  }
+
+  const tail = lines.slice(-MAX_DIFF_HUNK_LINES);
+  return tail.join('\n');
 }
