@@ -128,6 +128,29 @@ describe('ClaudeCliService', () => {
     );
   });
 
+  it('força o modelo econômico no re-review mesmo com outro CLAUDE_MODEL configurado', async () => {
+    const claudeCliService = buildService('claude-custom', 'opus');
+    const runClaudeCommandSpy = jest
+      .spyOn(claudeCliService as never, 'runClaudeCommand')
+      .mockResolvedValue(
+        '{"overview":"comentários reavaliados","items":[],"confidence":"high"}',
+      );
+
+    await expect(
+      claudeCliService.runReReview('reavalie os comentários'),
+    ).resolves.toEqual({
+      overview: 'comentários reavaliados',
+      items: [],
+      confidence: 'high',
+    });
+    expect(runClaudeCommandSpy).toHaveBeenCalledWith(
+      'claude-custom',
+      ['-p', '--model', 'haiku'],
+      300000,
+      'reavalie os comentários',
+    );
+  });
+
   it('lança erro quando a resposta do Claude CLI não passa no schema', async () => {
     const claudeCliService = buildService();
     jest
