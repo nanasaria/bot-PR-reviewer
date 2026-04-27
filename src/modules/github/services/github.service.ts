@@ -15,6 +15,8 @@ import type {
   GitHubPublishedReview,
   GitHubPullRequestComment,
   GitHubPullRequestFile,
+  GitHubPullRequestReview,
+  GitHubPullRequestReviewComment,
   GitHubPullRequestSummary,
 } from '../models/github-pull-request.model';
 import type { PullRequestReviewEvent } from '../models/review-event.model';
@@ -114,6 +116,7 @@ export class GitHubService {
         deletions: pullRequestFile.deletions,
         changes: pullRequestFile.changes,
         patch: pullRequestFile.patch,
+        previousFilename: pullRequestFile.previous_filename ?? undefined,
       }));
     } catch (error) {
       this.throwGitHubOperationError(
@@ -151,6 +154,88 @@ export class GitHubService {
         'Não foi possível buscar os comentários do PR',
         error,
       );
+    }
+  }
+
+  async listPullRequestReviewComments(
+    repositoryOwner: string,
+    repositoryName: string,
+    pullRequestNumber: number,
+  ): Promise<GitHubPullRequestReviewComment[]> {
+    try {
+      const reviewComments = await this.octokit.paginate(
+        this.octokit.pulls.listReviewComments,
+        {
+          owner: repositoryOwner,
+          repo: repositoryName,
+          pull_number: pullRequestNumber,
+          per_page: 100,
+        },
+      );
+
+      return reviewComments.map((comment) => ({
+        id: comment.id,
+        author: comment.user?.login ?? 'desconhecido',
+        body: comment.body ?? '',
+        filePath: comment.path,
+        line: comment.line ?? null,
+        originalLine: comment.original_line ?? null,
+        position: comment.position ?? null,
+        originalPosition: comment.original_position ?? null,
+        diffHunk: comment.diff_hunk ?? null,
+        inReplyToId: comment.in_reply_to_id ?? null,
+        pullRequestReviewId: comment.pull_request_review_id ?? null,
+        createdAt: comment.created_at,
+      }));
+    } catch (error) {
+      this.throwGitHubOperationError(
+        `Falha ao buscar comentários de revisão do PR ${repositoryOwner}/${repositoryName}#${pullRequestNumber}`,
+        'Não foi possível buscar os comentários de revisão do PR',
+        error,
+      );
+    }
+  }
+
+  async listPullRequestReviews(
+    repositoryOwner: string,
+    repositoryName: string,
+    pullRequestNumber: number,
+  ): Promise<GitHubPullRequestReview[]> {
+    try {
+      const reviews = await this.octokit.paginate(
+        this.octokit.pulls.listReviews,
+        {
+          owner: repositoryOwner,
+          repo: repositoryName,
+          pull_number: pullRequestNumber,
+          per_page: 100,
+        },
+      );
+
+      return reviews.map((review) => ({
+        id: review.id,
+        author: review.user?.login ?? 'desconhecido',
+        body: review.body ?? '',
+        state: review.state,
+        submittedAt: review.submitted_at ?? null,
+      }));
+    } catch (error) {
+      this.throwGitHubOperationError(
+        `Falha ao buscar reviews anteriores do PR ${repositoryOwner}/${repositoryName}#${pullRequestNumber}`,
+        'Não foi possível buscar as reviews anteriores do PR',
+        error,
+      );
+    }
+  }
+
+  async getAuthenticatedUserLoginSafe(): Promise<string | null> {
+    try {
+      return await this.getAuthenticatedUserLogin();
+    } catch (error) {
+      this.logger.warn(
+        `Não foi possível obter o login do usuário autenticado no GitHub: ${getErrorMessage(error)}`,
+      );
+      return null;
     }
   }
 

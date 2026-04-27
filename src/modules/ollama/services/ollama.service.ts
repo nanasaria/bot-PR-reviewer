@@ -5,12 +5,17 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { spawn } from 'node:child_process';
+import type { ZodTypeAny, z } from 'zod';
 import { getErrorMessage } from '../../../common/utils/error-message.util';
 import { extractJsonPayload } from '../../../common/utils/json-payload.util';
 import {
   ClaudeReview,
   ClaudeReviewSchema,
 } from '../../pr-review/models/claude-review.model';
+import {
+  ReReview,
+  ReReviewSchema,
+} from '../../pr-review/models/re-review.model';
 import type {
   OllamaChatMessageModel,
   OllamaChatRequestModel,
@@ -104,6 +109,17 @@ export class OllamaService {
   }
 
   async runReview(prompt: string): Promise<ClaudeReview> {
+    return this.runWithSchema(prompt, ClaudeReviewSchema);
+  }
+
+  async runReReview(prompt: string): Promise<ReReview> {
+    return this.runWithSchema(prompt, ReReviewSchema);
+  }
+
+  private async runWithSchema<TSchema extends ZodTypeAny>(
+    prompt: string,
+    schema: TSchema,
+  ): Promise<z.infer<TSchema>> {
     const ollamaApiBaseUrl = this.getOllamaApiBaseUrl();
     const ollamaModel = this.getOllamaModel();
     const ollamaTimeoutMs = this.getOllamaTimeoutMs();
@@ -138,7 +154,7 @@ export class OllamaService {
       'Não foi possível extrair JSON da resposta do Ollama.',
     );
 
-    const parseResult = ClaudeReviewSchema.safeParse(parsedJsonPayload);
+    const parseResult = schema.safeParse(parsedJsonPayload);
     if (!parseResult.success) {
       this.logger.error(
         'Resposta do Ollama não passou na validação',

@@ -7,12 +7,17 @@ import { ConfigService } from '@nestjs/config';
 import { spawn, type ChildProcessByStdio } from 'node:child_process';
 import { performance } from 'node:perf_hooks';
 import type { Readable, Writable } from 'node:stream';
+import type { ZodTypeAny, z } from 'zod';
 import { getErrorMessage } from '../../../common/utils/error-message.util';
 import { extractJsonPayload } from '../../../common/utils/json-payload.util';
 import {
   ClaudeReview,
   ClaudeReviewSchema,
 } from '../../pr-review/models/claude-review.model';
+import {
+  ReReview,
+  ReReviewSchema,
+} from '../../pr-review/models/re-review.model';
 
 @Injectable()
 export class ClaudeCliService {
@@ -21,6 +26,17 @@ export class ClaudeCliService {
   constructor(private readonly configService: ConfigService) {}
 
   async runReview(prompt: string): Promise<ClaudeReview> {
+    return this.runWithSchema(prompt, ClaudeReviewSchema);
+  }
+
+  async runReReview(prompt: string): Promise<ReReview> {
+    return this.runWithSchema(prompt, ReReviewSchema);
+  }
+
+  private async runWithSchema<TSchema extends ZodTypeAny>(
+    prompt: string,
+    schema: TSchema,
+  ): Promise<z.infer<TSchema>> {
     const claudeCommand =
       this.configService.get<string>('CLAUDE_COMMAND') ?? 'claude';
     const claudeModel =
@@ -41,7 +57,7 @@ export class ClaudeCliService {
       'Não foi possível extrair JSON da resposta do Claude CLI.',
     );
 
-    const parseResult = ClaudeReviewSchema.safeParse(parsedJsonPayload);
+    const parseResult = schema.safeParse(parsedJsonPayload);
     if (!parseResult.success) {
       this.logger.error(
         'Resposta do Claude CLI não passou na validação',
