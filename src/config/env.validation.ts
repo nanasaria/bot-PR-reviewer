@@ -23,6 +23,10 @@ export class EnvironmentConfig {
 
   @IsOptional()
   @IsString()
+  REVIEWER_LOGIN: string = '';
+
+  @IsOptional()
+  @IsString()
   CLAUDE_COMMAND: string = 'claude';
 
   @IsOptional()
