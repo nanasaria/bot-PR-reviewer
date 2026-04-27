@@ -7,6 +7,7 @@ export interface GitHubPullRequestFile {
   deletions: number;
   changes: number;
   patch?: string;
+  previousFilename?: string;
 }
 
 export interface GitHubPullRequestSummary {
@@ -26,6 +27,29 @@ export interface GitHubPullRequestComment {
   author: string;
   body: string;
   createdAt: string;
+}
+
+export interface GitHubPullRequestReviewComment {
+  id: number;
+  author: string;
+  body: string;
+  filePath: string;
+  line: number | null;
+  originalLine: number | null;
+  position: number | null;
+  originalPosition: number | null;
+  diffHunk: string | null;
+  inReplyToId: number | null;
+  pullRequestReviewId: number | null;
+  createdAt: string;
+}
+
+export interface GitHubPullRequestReview {
+  id: number;
+  author: string;
+  body: string;
+  state: string;
+  submittedAt: string | null;
 }
 
 export interface GitHubPublishedReview {
