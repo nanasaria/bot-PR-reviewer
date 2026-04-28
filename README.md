@@ -31,7 +31,7 @@ Edite o `.env` e preencha o `GITHUB_TOKEN`.
 | `GITHUB_API_BASE_URL`        | `https://api.github.com`      | Base URL da API (útil para GitHub Enterprise).                       |
 | `REVIEWER_LOGIN`             | _(vazio)_                     | Username GitHub (sem `@`) cujos comentários ativam o re-review.      |
 | `CLAUDE_COMMAND`             | `claude`                      | Comando do Claude Code CLI.                                          |
-| `CLAUDE_MODEL`               | `haiku`                       | Modelo do Claude CLI (alias ou ID). `haiku` é o mais econômico.      |
+| `CLAUDE_MODEL`               | `haiku`                       | Modelo do Claude CLI para o review inicial. O re-review sempre usa `haiku`, o alias econômico. |
 | `CLAUDE_TIMEOUT_MS`          | `300000`                      | Timeout do Claude em milissegundos. Mínimo suportado: `1000`.        |
 | `OLLAMA_API_BASE_URL`        | `http://localhost:11434/api`  | Base URL da API local do Ollama.                                     |
 | `OLLAMA_COMMAND`             | `ollama`                      | Comando usado para executar `ollama serve` no auto-start.            |
@@ -112,7 +112,7 @@ curl -X POST http://localhost:3081/pr-review \
 2. Busca metadados e arquivos alterados via Octokit.
 3. Identifica se já existem comentários anteriores válidos do reviewer configurado em `REVIEWER_LOGIN`. Se houver, dispara o fluxo de **re-review**; caso contrário, segue com o **review inicial**.
 4. Monta um prompt técnico apropriado ao modo (review inicial ou re-review).
-5. Tenta executar `claude -p "<prompt>"` via `child_process`.
+5. Tenta executar `claude -p "<prompt>"` via `child_process`; no re-review, força `--model haiku` para manter o fluxo no modelo econômico.
 6. Se o Claude retornar erro de limite de uso como `you've hint limit` ou `you've hit limit`, faz fallback local para o Ollama com `qwen3-coder:30b`.
 7. Valida o JSON retornado com **Zod**.
 8. Aplica as regras extras de decisão (apenas no review inicial):
@@ -143,6 +143,7 @@ Critérios usados para coletar comentários do reviewer:
 No re-review, o bot:
 
 - avalia somente os pontos previamente levantados, classificando cada um como `corrigido`, `parcialmente_corrigido`, `nao_corrigido`, `nao_aplicavel` ou `impossivel_validar`;
+- identifica no comentário publicado que o resultado é um re-review automático;
 - não procura problemas novos fora desse escopo;
 - mapeia comentários para o novo caminho do arquivo quando o arquivo foi renomeado e sinaliza explicitamente quando o trecho original não existe mais;
 - escolhe o evento publicado a partir dos status agregados:

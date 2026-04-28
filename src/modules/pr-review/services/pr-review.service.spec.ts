@@ -796,6 +796,9 @@ describe('PrReviewService re-review flow', () => {
     });
     const publishedBody = gitHubServiceMock.publishReview.mock.calls[0]?.[3];
     expect(publishedBody).toContain('## Re-review automatizada');
+    expect(publishedBody).toContain(
+      'Este comentário é um re-review automático',
+    );
     expect(publishedBody).toContain('Comentários anteriores analisados: 1');
     expect(publishedBody).toContain('**Status:** Não corrigido');
     expect(gitHubServiceMock.publishReview).toHaveBeenCalledWith(
