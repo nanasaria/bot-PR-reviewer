@@ -30,6 +30,10 @@ export class EnvironmentConfig {
   CLAUDE_COMMAND: string = 'claude';
 
   @IsOptional()
+  @IsString()
+  CLAUDE_MODEL: string = 'haiku';
+
+  @IsOptional()
   @IsInt()
   @Min(1000)
   CLAUDE_TIMEOUT_MS: number = 300000;

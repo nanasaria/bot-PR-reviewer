@@ -479,6 +479,7 @@ export class PrReviewService {
   ): string {
     const sections: string[] = [
       '## Re-review automatizada',
+      '> Este comentário é um re-review automático: a análise abaixo verifica apenas se os comentários anteriores foram resolvidos.',
       `_Modo executado: re-review. Reviewer configurado: \`${reviewerLogin}\`._`,
       this.formatTextSection('Visão Geral', reReview.overview),
       this.formatReReviewSummarySection(summaryCounts, originalCommentCount),

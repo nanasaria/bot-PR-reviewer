@@ -19,6 +19,8 @@ import {
   ReReviewSchema,
 } from '../../pr-review/models/re-review.model';
 
+const ECONOMICAL_CLAUDE_MODEL = 'haiku';
+
 @Injectable()
 export class ClaudeCliService {
   private readonly logger = new Logger(ClaudeCliService.name);
@@ -30,17 +32,20 @@ export class ClaudeCliService {
   }
 
   async runReReview(prompt: string): Promise<ReReview> {
-    return this.runWithSchema(prompt, ReReviewSchema);
+    return this.runWithSchema(prompt, ReReviewSchema, ECONOMICAL_CLAUDE_MODEL);
   }
 
   private async runWithSchema<TSchema extends ZodTypeAny>(
     prompt: string,
     schema: TSchema,
+    modelOverride?: string,
   ): Promise<z.infer<TSchema>> {
     const claudeCommand =
       this.configService.get<string>('CLAUDE_COMMAND') ?? 'claude';
     const claudeModel =
-      this.configService.get<string>('CLAUDE_MODEL') ?? 'haiku';
+      modelOverride ??
+      this.configService.get<string>('CLAUDE_MODEL') ??
+      ECONOMICAL_CLAUDE_MODEL;
     const claudeTimeoutMs =
       this.configService.get<number>('CLAUDE_TIMEOUT_MS') ?? 300000;
 
