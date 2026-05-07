@@ -12,7 +12,7 @@ describe('bootstrap', () => {
     jest.clearAllMocks();
   });
 
-  it('configura ValidationPipe global e sobe a aplicação na porta configurada', async () => {
+  it('configura ValidationPipe global, expõe Swagger e sobe a aplicação na porta configurada', async () => {
     const useGlobalPipesMock = jest.fn<void, [ValidationPipeSnapshot]>();
     const applicationMock = {
       useGlobalPipes: useGlobalPipesMock,
@@ -23,6 +23,10 @@ describe('bootstrap', () => {
     };
     const nestFactoryCreateMock = jest.fn().mockResolvedValue(applicationMock);
     const loggerLogMock = jest.fn();
+    const swaggerCreateDocumentMock = jest
+      .fn()
+      .mockReturnValue({ openapi: '3.0.0' });
+    const swaggerSetupMock = jest.fn();
     const nestCommon =
       jest.requireActual<typeof import('@nestjs/common')>('@nestjs/common');
 
@@ -35,6 +39,19 @@ describe('bootstrap', () => {
       ...nestCommon,
       Logger: {
         log: loggerLogMock,
+      },
+    }));
+    jest.doMock('@nestjs/swagger', () => ({
+      DocumentBuilder: jest.fn().mockImplementation(() => ({
+        setTitle: jest.fn().mockReturnThis(),
+        setDescription: jest.fn().mockReturnThis(),
+        setVersion: jest.fn().mockReturnThis(),
+        addTag: jest.fn().mockReturnThis(),
+        build: jest.fn().mockReturnValue({}),
+      })),
+      SwaggerModule: {
+        createDocument: swaggerCreateDocumentMock,
+        setup: swaggerSetupMock,
       },
     }));
     jest.doMock('./app.module', () => ({
@@ -55,9 +72,22 @@ describe('bootstrap', () => {
       whitelist: true,
       forbidNonWhitelisted: true,
     });
+    expect(swaggerCreateDocumentMock).toHaveBeenCalledTimes(1);
+    expect(swaggerSetupMock).toHaveBeenCalledTimes(1);
+    const setupCall = swaggerSetupMock.mock.calls[0] as unknown[];
+    expect(setupCall[0]).toBe('docs');
+    expect(setupCall[1]).toBe(applicationMock);
+    const setupOptions = setupCall[3] as {
+      swaggerOptions?: { persistAuthorization?: boolean };
+    };
+    expect(setupOptions.swaggerOptions?.persistAuthorization).toBe(true);
     expect(applicationMock.listen).toHaveBeenCalledWith(4000);
     expect(loggerLogMock).toHaveBeenCalledWith(
       'PR Review Bot ouvindo em http://localhost:4000',
+      'Bootstrap',
+    );
+    expect(loggerLogMock).toHaveBeenCalledWith(
+      'Swagger disponível em http://localhost:4000/docs',
       'Bootstrap',
     );
   });

@@ -13,6 +13,7 @@ describe('PrReviewController', () => {
         id: 101,
         htmlUrl:
           'https://github.com/acme/widgets/pull/42#pullrequestreview-101',
+        event: 'COMMENT',
       },
     };
     const prReviewServiceMock = {
