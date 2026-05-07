@@ -16,14 +16,17 @@ export const ReReviewItemSchema = z.object({
   recommendedAction: z.string().min(1),
 });
 
+export const ReReviewConfidenceSchema = z.enum(['high', 'medium', 'low']);
+
 export const ReReviewSchema = z.object({
   overview: z.string().min(1),
   items: z.array(ReReviewItemSchema).default([]),
-  confidence: z.enum(['high', 'medium', 'low']),
+  confidence: ReReviewConfidenceSchema,
 });
 
 export type ReReviewItemStatus = z.infer<typeof ReReviewItemStatusSchema>;
 export type ReReviewItem = z.infer<typeof ReReviewItemSchema>;
+export type ReReviewConfidence = z.infer<typeof ReReviewConfidenceSchema>;
 export type ReReview = z.infer<typeof ReReviewSchema>;
 
 export interface ReReviewSummaryCounts {
